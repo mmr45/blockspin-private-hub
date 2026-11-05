@@ -1,22 +1,28 @@
-"""Contrôles statiques : aucune exécution Roblox n'est simulée."""
+"""Controles statiques du script genere (aucune execution Roblox n'est simulee ici).
+Les tests de comportement sont dans tests/run_tests.py."""
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
-source = (root / 'src/main.lua').read_text()
-for name in ('Fishing', 'Farming', 'Fish Index', 'Settings'):
-    assert f'page("{name}")' in source, name
-for forbidden in ('FireServer(', 'InvokeServer(', 'HttpGet(', 'loadstring('):
+source = (root / "src/main.lua").read_text(encoding="utf-8")
+cycle = (root / "src/cycle.lua").read_text(encoding="utf-8")
+
+assert "--@@DEFAULT_DATA@@" not in source, "src/main.lua non regenere : lancer build.py"
+assert "local DEFAULT_DATA = {" in source
+assert source.replace("\r\n", "\n").count("\n") > cycle.count("\n"), "main.lua doit contenir les donnees injectees"
+assert "local VERSION = '0.8.0'" in source
+for name in ("Cycle", "Conduite", "Farming", "Fish Index", "Settings"):
+    assert f"page('{name}'" in source, name
+# Aucun RemoteEvent devine, aucun code distant charge par le script lui-meme.
+for forbidden in ("FireServer(", "InvokeServer(", "HttpGet(", "loadstring("):
     assert forbidden not in source, forbidden
-assert 'string.find(string.lower(name), query, 1, true)' in source
-assert 'player:GetNetworkPing()' in source and 'pcall(function()' in source
-assert 'connection:Disconnect()' in source and 'gui.Destroying:Connect' in source
-loader = (root / 'loader.example.lua').read_text().splitlines()
-assert len(loader) == 1
-assert 'REMPLACER_PAR_URL_HTTPS_REELLE_DU_MAIN_LUA' in loader[0]
-assert 'url:match("^https://")' in loader[0]
-assert 'local configPath = "blockspin-settings-v1.json"' in source
-assert 'pcall(callback, ...)' in source
-assert 'Input:GetFocusedTextBox()' in source
-assert 'if showMetrics or preferences.overlay or preferences.graph then' in source
-assert 'local VERSION = "0.4.0"' in source
-print('OK : 4 onglets, integrations fermees, filtre litteral, mesures protegees, nettoyage, loader bloque.')
+# Aucun deplacement direct du personnage ou de la voiture (teleportation).
+for forbidden in ("root.CFrame =", ".CFrame = CFrame", "PivotTo(", "AssemblyLinearVelocity ="):
+    assert forbidden not in source, forbidden
+# Seules F12 (urgence) et la touche d'affichage restent au clavier.
+for key in ("F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11"):
+    assert f"Enum.KeyCode.{key}" not in source, key
+assert "Enum.KeyCode.F12" in source
+assert "blockspin-settings-v1.json" in source
+loader = (root / "loader.lua").read_text(encoding="utf-8")
+assert "raw.githubusercontent.com/mmr45/blockspin-private-hub/main/src/main.lua" in loader
+print("OK : main.lua regenere, 5 onglets, pas de remote/teleportation, F3-F11 retirees, loader vers src/main.lua.")

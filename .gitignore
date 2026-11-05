@@ -4,3 +4,7 @@
 *.token
 *.key
 private/
+
+__pycache__/
+.venv/
+venv/

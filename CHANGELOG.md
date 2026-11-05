@@ -1,5 +1,19 @@
 # Historique
 
+## 0.8.0 — 2026-11-05 (branche `v0.8-cycle-hub`, non testée en jeu)
+
+- Le hub devient le script principal. `src/main.lua` est généré par `build.py` à partir de `src/cycle.lua` et `data/route_data.json`.
+- Pêche Auto Fish v0.6.8 reprise sans changement (mini-jeu, relance, inventaire n/18, appâts).
+- Cycle complet par états : voiture → vendeur → ATM → retour → pêche. Vente et dépôt validés uniquement par une baisse mesurée.
+- Nouveau pilote W/A/S/D : projection sur segments, anticipation, freinage, demi-tour, dégagement. Aucune téléportation.
+- Raccourcis F3–F11 remplacés par des boutons. Il ne reste que la touche d'affichage (RightShift) et F12 (urgence).
+- Nouveaux onglets Cycle (ouvert par défaut) et Conduite. Farming et Fish Index sont conservés tels quels (non reliés au jeu).
+- Le menu se masque pendant le mini-jeu et s'ouvre à gauche par défaut.
+- Réglages `blockspin-settings-v1.json` repris. Les champs 0.4.0 (profils, mode overlay…) sont conservés dans le fichier mais ne sont plus gérés par l'interface.
+- Retirés de l'interface : profils, histogrammes FPS/ping, modes d'overlay, bouton de réinitialisation, test d'erreur volontaire.
+- Tests : `tests/run_tests.py` (88 vérifications, maquette + modèle de voiture simplifié) remplace `tests/test_runtime.py`. `check_source.py` est réécrit.
+- Sources historiques (v0.6.8, v0.6.9, mémoire Codex) archivées dans `archives/`.
+
 ## 0.4.0 — 2026-11-05
 
 - Refonte de l'interface : fond charbon, accent personnalisable, barre de navigation et indicateur actif.

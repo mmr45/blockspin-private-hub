@@ -1,56 +1,98 @@
-# BlockSpin Hub 0.4.0
+# BlockSpin Hub 0.8.0 : pêche + cycle vente/ATM
 
-Prototype client Lua/Luau. Compatibilité Windows/Xeno non certifiée. Les contrôles automatisés utilisent une simulation ; aucun test réel Roblox/Xeno n'a été effectué.
+Le hub fusionne deux choses :
+- l'interface préparée dans ce dépôt (0.4.0) ;
+- le script Auto Fish v0.6.8 et un nouveau cycle de conduite.
+
+Compatibilité Windows/Xeno non certifiée. **Aucune fonction de 0.8.0 n'a encore été testée dans Roblox.** Ce qui est confirmé, simulé ou non testé est détaillé dans `CAPABILITES.md`.
 
 ## Lancement
 
-Copier le contenu de `loader.lua` dans l'exécuteur, ou copier directement `src/main.lua`. Le lanceur télécharge le code du dépôt public `mmr45/blockspin-private-hub`. Aucun jeton ni clé requis. Le code est visible et utilisable par tous.
+- Coller **tout** `src/main.lua` dans Xeno. C'est le script complet, données de trajet incluses.
+- Ou coller `loader.lua`. Il télécharge `src/main.lua` depuis la branche `main` du dépôt public : il n'aura la 0.8.0 qu'après fusion sur `main`.
+- Au lancement, le script arrête les anciennes versions : v0.6.x, tests de conduite 069→074, `BlockSpinTeleportConnection`, et une 0.8.0 précédente.
 
-## Interface 0.4.0
+**Arrêt complet** : Settings → « Tout arrêter et fermer le script », ou `getgenv().BlockSpinCycle080.stop()`. Cela relâche les touches et la souris, déconnecte tout, détruit le menu et l'overlay, et n'écrit aucun fichier de données.
 
-Interface charbon avec accent personnalisable (vert citron par défaut pour les nouveaux réglages), titres hiérarchisés, champs et boutons bordés. Farming s'ouvre par défaut ; les quatre actions de culture sont disposées en grille. Les états « En préparation » indiquent les actions non branchées au jeu.
+## Clavier
 
-Navigation latérale avec indicateur actif. Sous 620 pixels de largeur logique, les onglets deviennent FSH, FRM, IDX et SET. Les positions, profils et couleurs déjà enregistrés sont conservés. La géométrie est ajustée à la nouvelle taille minimale quand l'écran le permet.
+Les raccourcis F3–F11 sont remplacés par des boutons. Il reste seulement deux touches :
 
-## Menu et overlay
+| Touche | Rôle |
+|---|---|
+| `RightShift` (modifiable dans Settings) | afficher / masquer le menu |
+| `F12` | arrêt d'urgence : annule cycle et conduite, relâche les touches, coupe le cycle auto |
 
-- Glisser la barre du titre pour déplacer le menu.
-- Glisser la poignée `<>` en bas à droite pour redimensionner le menu. Dimensions limitées à l'écran ; minimum 480 × 400 si l'écran le permet.
-- Dans Settings, activer « Overlay FPS / ping ». Il reste visible quand le menu est masqué ; glisser l'overlay pour le déplacer.
-- Les FPS et le ping API sont actualisés environ chaque seconde. Si le ping n'est pas disponible, la valeur affiche `N/D`.
-- Le raccourci initial est `RightShift` (Maj droite). Dans Settings, cliquer « Raccourci », puis appuyer sur une touche clavier. Échap annule. La saisie dans un champ texte ne masque pas le menu.
-- Accent : saisir une couleur `#RRGGBB`, puis appliquer.
-- « Actualiser le diagnostic » affiche la version, l'état de sauvegarde et les préférences. Les cinq dernières erreurs capturées dans les callbacks du menu sont affichées ; « Tester la capture d'erreur » produit une erreur volontaire. Les erreurs de chargement initial restent dans la console de l'exécuteur.
-- « Tout arrêter et fermer » supprime le menu et l'overlay, et déconnecte les entrées et mesures de ce script. Cela n'arrête ni Roblox ni d'autres scripts.
+La conduite simule **W/A/S/D**, car W est le KeyCode confirmé pour avancer. Relâcher les touches n'arrête pas instantanément une voiture lancée.
 
-## Echelle, profils et graphiques
+## Onglets
 
-- Échelle du menu : saisir un pourcentage de 75 à 150 puis appliquer. Textes et boutons sont agrandis ensemble. La taille de la fenêtre est limitée à l'écran en tenant compte de l'échelle ; l'overlay garde sa taille propre.
-- Mesures de l'overlay : cliquer pour passer de FPS + ping à FPS seuls, puis ping seul.
-- Graphique : activer dans Settings pour afficher deux histogrammes indépendants, FPS et ping en millisecondes. Chacun conserve au maximum les 30 dernières mesures et adapte son échelle verticale. Une mesure de ping indisponible laisse une colonne vide. L'historique reste en mémoire pour la session.
-- Recentrer : remet le menu au centre et l'overlay au centre en haut, sans changer les autres préférences.
-- Profils : saisir un nom de 1 à 32 caractères, puis enregistrer/remplacer, charger ou supprimer. Maximum 10 profils. Un profil conserve la présentation, le raccourci et la géométrie, sans graines ni repères. La liste des noms apparaît sous le champ. Enregistrer un nom déjà présent remplace ce profil.
-- Réinitialiser : restaure les réglages par défaut, dont Maj droite, échelle 100 %, overlay et graphique désactivés. Les profils enregistrés sont conservés.
-- Sans API fichiers, les profils restent disponibles jusqu'à la fermeture du script.
+**Cycle**
+- État, inventaire, appâts, voiture mémorisée.
+- Boutons : pêche ON/OFF, cycle vente/ATM ON/OFF (désactivé au démarrage), lancer un cycle maintenant, annuler, reprendre après erreur.
+- Repères : point de pêche / vendeur / ATM « = ici ». La visée prend la position de la souris **3 s après** le clic, le temps de la placer sur l'eau.
+- Journal des 8 derniers événements.
 
-## Sauvegarde locale
+**Conduite**
+- Mémoriser la voiture : c'est aussi automatique dès que tu es au volant.
+- Test ALLER et Test RETOUR, avec départ après 3 s.
+- Vitesse cible au format `20/7`, mode natif en ligne droite.
+- Enregistrement de trajet dans un **tampon séparé**, puis « → ALLER » ou « → RETOUR ».
+- Sauvegarder les données, importer la route v0.6.8.
 
-Si `readfile`, `writefile` et `isfile` sont disponibles, la couleur, le raccourci, la visibilité des mesures et de l'overlay, la taille, les positions, l’échelle, le mode overlay, la visibilité du graphique et les profils sont sauvegardés dans `blockspin-settings-v1.json`, dans l'espace fichiers de l'exécuteur. Aucun dossier Windows fixe n'est supposé. Aucun identifiant, repère du personnage ou inventaire n'est enregistré.
+**Farming** : l'interface 0.4.0 (actions en grille, liste et filtre de graines). **Elle n'est pas reliée au jeu.**
 
-Sans ces fonctions, les réglages restent valables pour la session. Si le fichier est invalide ou illisible, il est préservé, les réglages par défaut sont utilisés et l'écriture est désactivée pour cette session. Pour réactiver la sauvegarde, corriger ou renommer ce fichier manuellement puis relancer. Une erreur d'écriture est signalée dans le diagnostic. Relancer remplace le précédent menu et restaure les préférences valides.
+**Fish Index** : vide, aucun poisson inventé.
 
-## Fonctions BlockSpin
+**Settings**
+- Accent, échelle 75–150 %, FPS/ping, overlay déplaçable.
+- Masquer le menu pendant le mini-jeu : activé par défaut, car les clics du mini-jeu partent à la position du curseur.
+- Choix de la touche d'affichage, recentrage.
+- Diagnostic : écrit `blockspin_diag_N.txt` avec les textes visibles et les ProximityPrompts à moins de 25 studs.
 
-Auto Fish, Auto Record, récolte, plantation, engrais et terre restent des boutons de démonstration. Aucune action réseau du jeu n'est envoyée. Fish Index reste vide. La liste des graines est manuelle : filtre textuel et sélection uniquement. Le repère existant note la position du personnage pendant la session, pas l'appât. Aucune gestion supplémentaire des repères n'a été ajoutée.
+Le menu se déplace par l'en-tête et se redimensionne par `<>`. Il s'ouvre à gauche pour laisser le centre libre.
 
-## Tests
+## Cycle
 
-- `python3 tests/check_source.py` : contrôles du texte source uniquement.
-- `python3 tests/test_runtime.py` : tests avec moteur Lua et API Roblox simulées ; nécessite `lupa==2.8` dans l'environnement de test, pas dans Xeno.
-- `tests/MANUAL.md` : tests réels encore à effectuer.
+`INVENTORY_FULL → TO_CAR → NAVIGATING_TO_VENDOR → EXIT_CAR → WALK_TO_VENDOR → SELLING → NAVIGATING_TO_ATM → DEPOSITING → BACK_TO_CAR → RETURNING → RESUMING → FISHING`
 
-Le lanceur vérifie le téléchargement et la compilation ; il ne vérifie pas une signature. Le dépôt public ne protège pas le code contre la copie. L'utilisation d'un exécuteur dans une expérience tierce peut entraîner des sanctions.
+- Chaque étape a un délai maximal, une annulation et un message. En cas d'échec, l'état passe à `ERROR` sans relance en boucle.
+- La vente n'est validée que si le compteur `n/18` **baisse**.
+- Le dépôt n'est validé que si l'argent en main **baisse**. Sinon il est marqué « NON vérifié » et le cycle continue (`S.depositRequired = true` pour bloquer).
+- L'aller utilise `route_to_vendor` (19 points). Le retour utilise `route_to_fishing` (20 points distincts), jamais l'aller inversé.
 
-Image du README : illustration de [BlockSpin par Cinnamon Go!](https://www.roblox.com/games/104715542330896/BlockSpin), récupérée depuis la page officielle Roblox. Ce dépôt n'est pas affilié au créateur du jeu.
+## Pilote de conduite
 
-API utilisées : [UserInputService](https://create.roblox.com/docs/reference/engine/classes/UserInputService) et [HttpService JSON](https://create.roblox.com/docs/reference/engine/classes/HttpService). [UIScale](https://create.roblox.com/docs/reference/engine/classes/UIScale) règle l’échelle du menu. Les API de fichiers dépendent de l'exécuteur et ne sont pas garanties.
+- **Suivi** : projection sur les segments (un point dépassé n'est jamais « derrière »), cible anticipée de 9 à 24 studs selon la vitesse.
+- **Vitesse** : limitée par la courbure à venir et la distance de freinage (S sert de frein ; décélération supposée).
+- **Demi-tour** : avant braqué, puis marche arrière contre-braquée.
+- **Blocage** : dégagement en marche arrière, puis échec explicite.
+
+**Cause probable de l'échec v0.7.4** (non prouvée) : l'aller commence par le demi-tour manuel (caps −124°, +142°, puis ≈180°). Le retour se termine cap ≈ +37°, donc une voiture garée après un retour a le point 2 derrière elle. Côté vendeur, il faut aussi un demi-tour.
+
+## Données et réglages
+
+- Trajets : `blockspin_data_v080.json`, même schéma que `data/route_data.json`.
+  - Validation stricte ; un fichier invalide est refusé et les données intégrées sont gardées.
+  - Jamais écrit automatiquement ; l'ancien fichier est copié en `.bak` à chaque sauvegarde.
+- Réglages du menu : `blockspin-settings-v1.json`, le même fichier que le hub 0.4.0. Les champs inconnus, comme les profils 0.4.0, sont conservés. Un fichier illisible est préservé et l'écriture est coupée pour la session.
+- L'ancien `blockspin_route_v068.json` n'est chargé qu'avec le bouton « Importer route v0.6.8 ».
+
+## Passage sous la carte : non réalisé, refusé
+
+- Il n'y a pas de sol sous la carte : en conduite normale, la voiture tombe et est détruite.
+- Le seul moyen serait de déplacer la voiture par script. C'est le même type de déplacement que la téléportation qui a déclenché « Téléportation détectée », dans le but de passer sous l'anti-triche. Ce n'est pas fourni.
+- Rien ici n'est présenté comme indétectable. Utiliser un exécuteur dans une expérience tierce peut entraîner des sanctions.
+
+## Développement
+
+```
+python -m venv .venv && .venv\Scripts\pip install lupa==2.8
+.venv\Scripts\python -I build.py              # src/cycle.lua + data/route_data.json -> src/main.lua
+.venv\Scripts\python -I tests/check_source.py
+.venv\Scripts\python -I tests/run_tests.py
+```
+
+Ne pas modifier `src/main.lua` à la main : il est régénéré par `build.py`. Les tests utilisent un modèle de voiture simplifié et une maquette Roblox aux interfaces **inventées**. Ils ne valident ni la physique du G-Cruzer, ni les vrais écrans BlockSpin, ni Xeno. Les tests réels à faire sont listés dans `tests/MANUAL.md`.
+
+Image du README : illustration de [BlockSpin par Cinnamon Go!](https://www.roblox.com/games/104715542330896/BlockSpin). Ce dépôt n'est pas affilié au créateur du jeu.
