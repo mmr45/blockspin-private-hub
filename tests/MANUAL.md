@@ -15,3 +15,13 @@ Aucun cas ci-dessous n'a été exécuté dans Roblox ou Xeno.
 11. Vérifier Fish Index vide, sans poisson ou capture inventés.
 12. Loader non configuré : arrêt explicite avant téléchargement. Après hébergement contrôlé : tester échec HTTP, texte non Lua, erreur d'exécution et succès.
 13. Répéter sous Windows avec la version exacte de Xeno envisagée ; noter date, versions Roblox/Xeno et erreurs. Aucune compatibilité n'est acquise avant ce test.
+
+## Version 0.2.0 — nouveaux cas, non exécutés dans Roblox/Xeno
+
+14. Glisser le titre et redimensionner avec `<>` ; tester les limites de l'écran et réduire la fenêtre Roblox.
+15. Dans Settings, activer l'overlay, masquer le menu avec le raccourci : seul l'overlay reste visible. Le déplacer, désactiver puis réactiver.
+16. Changer le raccourci vers F6 ; vérifier que Maj droite ne masque plus le menu. Échap annule la capture. Saisir dans un champ ne déclenche pas le raccourci.
+17. Modifier accent, mesures, overlay et géométrie. Fermer puis relancer : restauration si les API fichiers sont disponibles, sinon diagnostic explicite.
+18. Avec un fichier JSON invalide : démarrage par défaut, erreur visible, fichier non écrasé. Avec écriture refusée : erreur visible et interface utilisable.
+19. Tester le diagnostic : erreur volontaire visible, historique limité à cinq erreurs. Tester un ping indisponible : `N/D`.
+20. Cliquer « Tout arrêter et fermer » : menu et overlay supprimés. Relancer deux fois : un seul ensemble actif.
