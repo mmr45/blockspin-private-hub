@@ -1,5 +1,15 @@
 # Historique
 
+## 0.3.0 — 2026-11-05
+
+- Échelle du menu réglable de 75 à 150 %.
+- Jusqu'à 10 profils nommés : enregistrer, remplacer, charger et supprimer.
+- Choix FPS seuls, ping seul ou les deux dans l'overlay.
+- Histogrammes FPS/ping des 30 dernières mesures, activables dans Settings.
+- Recentrage du menu et de l'overlay ; réinitialisation des réglages sans supprimer les profils.
+- Lecture des anciens réglages 0.2.0 avec valeurs par défaut pour les nouveaux champs.
+- Aucun bouton de réouverture ajouté. README conservé avec uniquement l'image.
+
 ## 0.2.0 — 2026-11-05
 
 - Sauvegarde locale des préférences quand les API fichiers existent.

@@ -1,4 +1,4 @@
-# BlockSpin Hub 0.2.0
+# BlockSpin Hub 0.3.0
 
 Prototype client Lua/Luau. Compatibilité Windows/Xeno non certifiée. Les contrôles automatisés utilisent une simulation ; aucun test réel Roblox/Xeno n'a été effectué.
 
@@ -17,9 +17,19 @@ Copier le contenu de `loader.lua` dans l'exécuteur, ou copier directement `src/
 - « Actualiser le diagnostic » affiche la version, l'état de sauvegarde et les préférences. Les cinq dernières erreurs capturées dans les callbacks du menu sont affichées ; « Tester la capture d'erreur » produit une erreur volontaire. Les erreurs de chargement initial restent dans la console de l'exécuteur.
 - « Tout arrêter et fermer » supprime le menu et l'overlay, et déconnecte les entrées et mesures de ce script. Cela n'arrête ni Roblox ni d'autres scripts.
 
+## Echelle, profils et graphiques
+
+- Échelle du menu : saisir un pourcentage de 75 à 150 puis appliquer. Textes et boutons sont agrandis ensemble. La taille de la fenêtre est limitée à l'écran en tenant compte de l'échelle ; l'overlay garde sa taille propre.
+- Mesures de l'overlay : cliquer pour passer de FPS + ping à FPS seuls, puis ping seul.
+- Graphique : activer dans Settings pour afficher deux histogrammes indépendants, FPS et ping en millisecondes. Chacun conserve au maximum les 30 dernières mesures et adapte son échelle verticale. Une mesure de ping indisponible laisse une colonne vide. L'historique reste en mémoire pour la session.
+- Recentrer : remet le menu au centre et l'overlay au centre en haut, sans changer les autres préférences.
+- Profils : saisir un nom de 1 à 32 caractères, puis enregistrer/remplacer, charger ou supprimer. Maximum 10 profils. Un profil conserve la présentation, le raccourci et la géométrie, sans graines ni repères. La liste des noms apparaît sous le champ. Enregistrer un nom déjà présent remplace ce profil.
+- Réinitialiser : restaure les réglages par défaut, dont Maj droite, échelle 100 %, overlay et graphique désactivés. Les profils enregistrés sont conservés.
+- Sans API fichiers, les profils restent disponibles jusqu'à la fermeture du script.
+
 ## Sauvegarde locale
 
-Si `readfile`, `writefile` et `isfile` sont disponibles, la couleur, le raccourci, la visibilité des mesures et de l'overlay, la taille et les positions sont sauvegardés dans `blockspin-settings-v1.json`, dans l'espace fichiers de l'exécuteur. Aucun dossier Windows fixe n'est supposé. Aucun identifiant, repère du personnage ou inventaire n'est enregistré.
+Si `readfile`, `writefile` et `isfile` sont disponibles, la couleur, le raccourci, la visibilité des mesures et de l'overlay, la taille, les positions, l’échelle, le mode overlay, la visibilité du graphique et les profils sont sauvegardés dans `blockspin-settings-v1.json`, dans l'espace fichiers de l'exécuteur. Aucun dossier Windows fixe n'est supposé. Aucun identifiant, repère du personnage ou inventaire n'est enregistré.
 
 Sans ces fonctions, les réglages restent valables pour la session. Si le fichier est invalide ou illisible, il est préservé, les réglages par défaut sont utilisés et l'écriture est désactivée pour cette session. Pour réactiver la sauvegarde, corriger ou renommer ce fichier manuellement puis relancer. Une erreur d'écriture est signalée dans le diagnostic. Relancer remplace le précédent menu et restaure les préférences valides.
 
@@ -37,4 +47,4 @@ Le lanceur vérifie le téléchargement et la compilation ; il ne vérifie pas u
 
 Image du README : illustration de [BlockSpin par Cinnamon Go!](https://www.roblox.com/games/104715542330896/BlockSpin), récupérée depuis la page officielle Roblox. Ce dépôt n'est pas affilié au créateur du jeu.
 
-API utilisées : [UserInputService](https://create.roblox.com/docs/reference/engine/classes/UserInputService) et [HttpService JSON](https://create.roblox.com/docs/reference/engine/classes/HttpService). Les API de fichiers dépendent de l'exécuteur et ne sont pas garanties.
+API utilisées : [UserInputService](https://create.roblox.com/docs/reference/engine/classes/UserInputService) et [HttpService JSON](https://create.roblox.com/docs/reference/engine/classes/HttpService). [UIScale](https://create.roblox.com/docs/reference/engine/classes/UIScale) règle l’échelle du menu. Les API de fichiers dépendent de l'exécuteur et ne sont pas garanties.

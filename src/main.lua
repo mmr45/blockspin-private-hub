@@ -1,5 +1,5 @@
 -- BlockSpin Private Hub: prototype client, aucune integration de jeu verifiee.
-local VERSION = "0.2.0"
+local VERSION = "0.3.0"
 local Http = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -13,7 +13,12 @@ if old then old:Destroy() end
 local function unavailable(feature)
     return feature .. " : integration BlockSpin non verifiee. Aucune action envoyee."
 end
-local preferences = {accent = "A0A0A0", hotkey = "RightShift", metrics = true, overlay = false}
+local function defaults()
+    return {accent = "A0A0A0", hotkey = "RightShift", metrics = true, overlay = false,
+        scale = 1, overlayMode = "both", graph = false}
+end
+local preferences = defaults()
+local profiles = {}
 local configPath = "blockspin-settings-v1.json"
 local storage = type(readfile) == "function" and type(writefile) == "function" and type(isfile) == "function"
 local storageStatus = storage and "Disponible" or "Indisponible : reglages de session uniquement"
@@ -37,22 +42,50 @@ end
 local function validPoint(point)
     return type(point) == "table" and finite(point.x) and finite(point.y)
 end
+local function validatePreferences(data)
+    assert(type(data) == "table", "Reglages invalides")
+    assert(type(data.accent) == "string" and data.accent:match("^%x%x%x%x%x%x$"), "Accent invalide")
+    assert(validKey(data.hotkey), "Raccourci invalide")
+    assert(type(data.metrics) == "boolean" and type(data.overlay) == "boolean", "Visibilite invalide")
+    local result = {accent = data.accent, hotkey = data.hotkey, metrics = data.metrics, overlay = data.overlay,
+        scale = data.scale, overlayMode = data.overlayMode, graph = data.graph}
+    if result.scale == nil then result.scale = 1 end
+    if result.overlayMode == nil then result.overlayMode = "both" end
+    if result.graph == nil then result.graph = false end
+    assert(finite(result.scale) and result.scale >= 0.75 and result.scale <= 1.5, "Echelle invalide")
+    assert(result.overlayMode == "both" or result.overlayMode == "fps" or result.overlayMode == "ping", "Mode overlay invalide")
+    assert(type(result.graph) == "boolean", "Graphique invalide")
+    for _, field in ipairs({"position", "size", "overlayPosition"}) do
+        assert(data[field] == nil or validPoint(data[field]), "Geometrie invalide")
+        if data[field] then result[field] = {x = data[field].x, y = data[field].y} end
+    end
+    return result
+end
+local function validProfileName(name)
+    if type(name) ~= "string" then return false end
+    local length = utf8.len(name)
+    return length ~= nil and length > 0 and length <= 32 and not name:find("%c")
+end
 if storage then
     local ok, result = pcall(function()
         if not isfile(configPath) then return nil end
         local raw = readfile(configPath)
-        assert(type(raw) == "string" and #raw <= 8192, "Fichier de reglages trop grand")
+        assert(type(raw) == "string" and #raw <= 32768, "Fichier de reglages trop grand")
         local data = Http:JSONDecode(raw)
         assert(type(data) == "table" and data.schema == 1, "Format de reglages invalide")
-        assert(type(data.accent) == "string" and data.accent:match("^%x%x%x%x%x%x$"), "Accent invalide")
-        assert(validKey(data.hotkey), "Raccourci invalide")
-        assert(type(data.metrics) == "boolean" and type(data.overlay) == "boolean", "Visibilite invalide")
-        for _, field in ipairs({"position", "size", "overlayPosition"}) do
-            assert(data[field] == nil or validPoint(data[field]), "Geometrie invalide")
+        local current = validatePreferences(data)
+        local savedProfiles = data.profiles
+        if savedProfiles == nil then savedProfiles = {} end
+        assert(type(savedProfiles) == "table", "Profils invalides")
+        local count, validated = 0, {}
+        for name, profile in pairs(savedProfiles) do
+            count = count + 1
+            assert(count <= 10 and validProfileName(name), "Nom ou nombre de profils invalide")
+            validated[name] = validatePreferences(profile)
         end
-        return data
+        return {current = current, profiles = validated}
     end)
-    if ok and result then preferences = result
+    if ok and result then preferences, profiles = result.current, result.profiles
     elseif not ok then
         storage = false
         storageStatus = "Lecture impossible : fichier preserve, sauvegarde desactivee"
@@ -62,8 +95,9 @@ end
 local function saveSettings()
     if not storage then return end
     local ok, err = pcall(function()
-        preferences.schema = 1
-        writefile(configPath, Http:JSONEncode(preferences))
+        local data = validatePreferences(preferences)
+        data.schema, data.profiles = 1, profiles
+        writefile(configPath, Http:JSONEncode(data))
     end)
     storageStatus = ok and "Sauvegarde OK" or "Ecriture impossible"
     if not ok then report(err) end
@@ -96,18 +130,19 @@ while viewport.AbsoluteSize.X <= 0 or viewport.AbsoluteSize.Y <= 0 do
     assert(os.clock() - layoutStart < 10, "Dimensions de fenetre indisponibles")
     RunService.RenderStepped:Wait()
 end
+local menuScale = make("UIScale", {Scale = preferences.scale}, window)
 local function fitWindow()
     local v = viewport.AbsoluteSize
-    local w = math.clamp(window.Size.X.Offset, math.min(360, v.X), math.max(1, v.X))
-    local h = math.clamp(window.Size.Y.Offset, math.min(340, v.Y), math.max(1, v.Y))
+    local w = math.clamp(window.Size.X.Offset, math.min(360, v.X / preferences.scale), math.max(1, v.X / preferences.scale))
+    local h = math.clamp(window.Size.Y.Offset, math.min(340, v.Y / preferences.scale), math.max(1, v.Y / preferences.scale))
     window.Size = UDim2.fromOffset(w, h)
-    window.Position = UDim2.fromOffset(math.clamp(window.Position.X.Offset, 0, math.max(0, v.X - w)),
-        math.clamp(window.Position.Y.Offset, 0, math.max(0, v.Y - h)))
+    window.Position = UDim2.fromOffset(math.clamp(window.Position.X.Offset, 0, math.max(0, v.X - w * preferences.scale)),
+        math.clamp(window.Position.Y.Offset, 0, math.max(0, v.Y - h * preferences.scale)))
 end
 local initialSize = preferences.size or {x = math.min(700, viewport.AbsoluteSize.X * 0.9),
     y = math.min(580, viewport.AbsoluteSize.Y * 0.85)}
-local initialPosition = preferences.position or {x = (viewport.AbsoluteSize.X - initialSize.x) / 2,
-    y = (viewport.AbsoluteSize.Y - initialSize.y) / 2}
+local initialPosition = preferences.position or {x = (viewport.AbsoluteSize.X - initialSize.x * preferences.scale) / 2,
+    y = (viewport.AbsoluteSize.Y - initialSize.y * preferences.scale) / 2}
 window.AnchorPoint = Vector2.new(0, 0)
 window.Size = UDim2.fromOffset(initialSize.x, initialSize.y)
 window.Position = UDim2.fromOffset(initialPosition.x, initialPosition.y)
@@ -311,7 +346,7 @@ connect(Input.InputChanged, function(input)
     elseif input.UserInputType ~= Enum.UserInputType.MouseMovement then return end
     local dx, dy = input.Position.X - gesture.start.X, input.Position.Y - gesture.start.Y
     if gesture.mode == "resize" then
-        window.Size = UDim2.fromOffset(gesture.size.X + dx, gesture.size.Y + dy)
+        window.Size = UDim2.fromOffset(gesture.size.X + dx / preferences.scale, gesture.size.Y + dy / preferences.scale)
         fitWindow()
     else
         local target = gesture.mode == "overlay" and overlay or window
@@ -331,6 +366,161 @@ connect(Input.WindowFocusReleased, function() gesture = nil end)
 connect(viewport:GetPropertyChangedSignal("AbsoluteSize"), function()
     fitWindow()
     fitOverlay()
+end)
+local scaleInput = textbox(settings, "Echelle du menu : 75 a 150 (%)")
+scaleInput.Text = tostring(math.floor(preferences.scale * 100 + 0.5))
+button(settings, "Appliquer l'echelle du menu", function()
+    local percent = tonumber(scaleInput.Text)
+    if not finite(percent) or percent < 75 or percent > 150 then
+        status.Text = "Echelle invalide : choisir 75 a 150 %."; return
+    end
+    preferences.scale = percent / 100
+    menuScale.Scale = preferences.scale
+    fitWindow()
+    rememberGeometry()
+    saveSettings()
+end)
+local modeNames = {both = "FPS + ping", fps = "FPS seuls", ping = "Ping seul"}
+local modeButton
+local function modeText() return "Mesures overlay : " .. modeNames[preferences.overlayMode] end
+modeButton = button(settings, modeText(), function()
+    local modes = {both = "fps", fps = "ping", ping = "both"}
+    preferences.overlayMode = modes[preferences.overlayMode]
+    modeButton.Text = modeText()
+    overlay.Text = "  Actualisation..."
+    saveSettings()
+end)
+local graphButton
+local function graphText() return preferences.graph and "Graphique : actif" or "Graphique : inactif" end
+local charts = {}
+local history = {}
+local function chart(name, color)
+    local caption = label(settings, name .. " : en attente", 36)
+    local plot = make("Frame", {Size = UDim2.new(1, 0, 0, 60), BorderSizePixel = 0,
+        BackgroundColor3 = Color3.fromRGB(20, 20, 20)}, settings)
+    local bars = {}
+    for i = 1, 30 do
+        bars[i] = make("Frame", {Name = name .. "Sample" .. i, BorderSizePixel = 0,
+            BackgroundColor3 = color, AnchorPoint = Vector2.new(0, 1),
+            Position = UDim2.new((i - 1) / 30, 0, 1, 0), Size = UDim2.new(1 / 30, -1, 0, 0)}, plot)
+    end
+    return {caption = caption, plot = plot, bars = bars, name = name}
+end
+local function graphVisibility()
+    for _, item in ipairs(charts) do
+        item.caption.Visible, item.plot.Visible = preferences.graph, preferences.graph
+    end
+end
+graphButton = button(settings, graphText(), function()
+    preferences.graph = not preferences.graph
+    graphButton.Text = graphText()
+    graphVisibility()
+    saveSettings()
+end)
+charts[1] = chart("FPS", Color3.fromRGB(70, 200, 255))
+charts[2] = chart("Ping", Color3.fromRGB(255, 190, 70))
+graphVisibility()
+local function updateCharts(fps, ping)
+    table.insert(history, {fps = fps, ping = ping})
+    if #history > 30 then table.remove(history, 1) end
+    if not preferences.graph then return end
+    for index, item in ipairs(charts) do
+        local field = index == 1 and "fps" or "ping"
+        local maximum = 1
+        for _, sample in ipairs(history) do maximum = math.max(maximum, sample[field] or 0) end
+        item.caption.Text = string.format("%s : 30 dernieres mesures | haut : %.0f%s", item.name,
+            maximum, index == 1 and " FPS" or " ms")
+        for i, bar in ipairs(item.bars) do
+            local sample = history[i - (30 - #history)]
+            local value = sample and sample[field]
+            bar.Size = UDim2.new(1 / 30, -1, value and value / maximum or 0, 0)
+        end
+    end
+end
+local function applyPreferences()
+    gesture, capturing = nil, false
+    menuScale.Scale = preferences.scale
+    accent.Text = preferences.accent
+    applyAccent(preferences.accent)
+    showMetrics, metrics.Visible = preferences.metrics, preferences.metrics
+    metricButton.Text = showMetrics and "FPS / ping : affiches" or "FPS / ping : masques"
+    overlay.Visible, overlayButton.Text = preferences.overlay, overlayText()
+    overlay.Text = "  Actualisation..."
+    hotkeyButton.Text, modeButton.Text, graphButton.Text = keyText(), modeText(), graphText()
+    scaleInput.Text = tostring(math.floor(preferences.scale * 100 + 0.5))
+    graphVisibility()
+    local size = preferences.size or {x = 700, y = 580}
+    window.Size = UDim2.fromOffset(size.x, size.y)
+    local position = preferences.position or {x = (viewport.AbsoluteSize.X - size.x * preferences.scale) / 2,
+        y = (viewport.AbsoluteSize.Y - size.y * preferences.scale) / 2}
+    window.Position = UDim2.fromOffset(position.x, position.y)
+    local point = preferences.overlayPosition or {x = 12, y = 12}
+    overlay.Position = UDim2.fromOffset(point.x, point.y)
+    fitWindow()
+    fitOverlay()
+end
+button(settings, "Recentrer le menu et l'overlay", function()
+    gesture = nil
+    fitWindow()
+    local v = viewport.AbsoluteSize
+    window.Position = UDim2.fromOffset((v.X - window.Size.X.Offset * preferences.scale) / 2,
+        (v.Y - window.Size.Y.Offset * preferences.scale) / 2)
+    overlay.Position = UDim2.fromOffset((v.X - overlay.Size.X.Offset) / 2, 12)
+    fitOverlay()
+    rememberGeometry()
+    saveSettings()
+end)
+local profileInput = textbox(settings, "Nom du profil (32 caracteres maximum)")
+local profileList = label(settings, "", 0)
+profileList.AutomaticSize = Enum.AutomaticSize.Y
+local function refreshProfiles()
+    local names = {}
+    for name in pairs(profiles) do table.insert(names, name) end
+    table.sort(names)
+    profileList.Text = #names == 0 and "Aucun profil enregistre." or "Profils : " .. table.concat(names, ", ")
+end
+local function profileName()
+    local name = profileInput.Text:match("^%s*(.-)%s*$")
+    if not validProfileName(name) then status.Text = "Nom invalide : 1 a 32 caracteres, sans controle."; return nil end
+    return name
+end
+button(settings, "Enregistrer / remplacer le profil", function()
+    local name = profileName()
+    if not name then return end
+    local count = 0
+    for _ in pairs(profiles) do count = count + 1 end
+    if not profiles[name] and count >= 10 then status.Text = "Limite : 10 profils."; return end
+    rememberGeometry()
+    profiles[name] = validatePreferences(preferences)
+    refreshProfiles()
+    status.Text = "Profil enregistre : " .. name
+    saveSettings()
+end)
+button(settings, "Charger le profil", function()
+    local name = profileName()
+    if not name then return end
+    if not profiles[name] then status.Text = "Profil introuvable."; return end
+    preferences = validatePreferences(profiles[name])
+    applyPreferences()
+    status.Text = "Profil charge : " .. name
+    saveSettings()
+end)
+button(settings, "Supprimer le profil", function()
+    local name = profileName()
+    if not name then return end
+    if not profiles[name] then status.Text = "Profil introuvable."; return end
+    profiles[name] = nil
+    refreshProfiles()
+    status.Text = "Profil supprime : " .. name
+    saveSettings()
+end)
+refreshProfiles()
+button(settings, "Reinitialiser les reglages (garder les profils)", function()
+    preferences = defaults()
+    applyPreferences()
+    status.Text = "Reglages reinitialises. Raccourci : RightShift. Profils conserves."
+    rememberGeometry()
+    saveSettings()
 end)
 local diagnosticInfo = label(settings, "", 100)
 diagnostic = label(settings, #errors > 0 and table.concat(errors, "\n") or "Aucune erreur capturee.", 130)
@@ -368,14 +558,19 @@ connect(RunService.RenderStepped, function(dt)
     frames = frames + 1
     elapsed = elapsed + dt
     if elapsed < 1 then return end
-    if showMetrics or preferences.overlay then
+    if showMetrics or preferences.overlay or preferences.graph then
         local ok, ping = pcall(function() return player:GetNetworkPing() end)
         local pingText = "N/D"
         if ok and type(ping) == "number" and ping >= 0 and ping < math.huge then
             pingText = string.format("%.0f ms", ping * 1000)
         end
         metrics.Text = string.format("  FPS : %.0f | Ping API : %s", frames / elapsed, pingText)
-        overlay.Text = metrics.Text
+        local fps = frames / elapsed
+        if preferences.overlayMode == "fps" then overlay.Text = string.format("  FPS : %.0f", fps)
+        elseif preferences.overlayMode == "ping" then overlay.Text = "  Ping API : " .. pingText
+        else overlay.Text = metrics.Text end
+        local validPing = ok and finite(ping) and ping >= 0 and ping * 1000 or nil
+        updateCharts(fps, validPing)
     end
     frames, elapsed = 0, 0
 end)

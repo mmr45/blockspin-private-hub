@@ -126,7 +126,7 @@ function writefile(path, data) files[path]=data end
 
 lua = runtime()
 lua.execute('''
-assert(find('BLOCKSPIN').Text:find('0.2.0',1,true))
+assert(find('BLOCKSPIN').Text:find('0.3.0',1,true))
 click('Overlay FPS / ping : inactif')
 local overlay=find('FPS : -- | Ping : N/D')
 assert(overlay.Visible)
@@ -177,3 +177,74 @@ lua = runtime(json.dumps({**data, 'position': {'x': -99999, 'y': 99999}, 'size':
 lua.execute("local w=find('BLOCKSPIN').Parent;assert(w.Position.X.Offset>=0 and w.Position.Y.Offset>=0 and w.AbsoluteSize.X>=360 and w.AbsoluteSize.Y<=800)")
 lua.execute("function player:GetNetworkPing() error('unavailable') end;for i=1,61 do render.RenderStepped:Fire(1/60) end;assert(find('Ping API : N/D'))")
 print('OK : overlay, mesures, raccourci, focus, annulation, geometrie, sauvegarde, fichiers invalides, erreurs, fermeture et relance')
+
+# New settings: profiles are independent snapshots, reset preserves them.
+lua = runtime()
+lua.execute("""
+function field(placeholder)
+ for _,o in ipairs(objects) do if not o.destroyed and o.PlaceholderText and o.PlaceholderText:find(placeholder,1,true) then return o end end
+ error('missing field '..placeholder)
+end
+field('Echelle du menu').Text='150';click("Appliquer l'echelle")
+local w=find('BLOCKSPIN').Parent
+assert(w.Size.X.Offset<=1000/1.5 and w.Size.Y.Offset<=800/1.5)
+click('Recentrer le menu')
+assert(math.abs(w.Position.X.Offset-(1000-w.Size.X.Offset*1.5)/2)<0.001)
+field('Echelle du menu').Text='nan';click("Appliquer l'echelle");assert(find('Echelle invalide'))
+click('Overlay FPS / ping : inactif')
+local overlay
+for _,o in ipairs(objects) do if o.Name=='PerformanceOverlay' then overlay=o end end
+click('Mesures overlay : FPS + ping');render.RenderStepped:Fire(1)
+assert(overlay.Text:find('FPS',1,true) and not overlay.Text:find('Ping',1,true))
+click('Mesures overlay : FPS seuls');render.RenderStepped:Fire(1)
+assert(overlay.Text:find('Ping',1,true) and not overlay.Text:find('FPS',1,true))
+field('Nom du profil').Text='Grand';click('Enregistrer / remplacer le profil')
+click('Reinitialiser les reglages')
+assert(not overlay.Visible);assert(find('Mesures overlay : FPS + ping'));assert(find('Profils : Grand'))
+click('Charger le profil');assert(overlay.Visible);assert(find('Mesures overlay : Ping seul'))
+field('Echelle du menu').Text='75';click("Appliquer l'echelle")
+click('Charger le profil')
+for _,o in ipairs(objects) do if not o.destroyed and o.ClassName=='UIScale' then assert(o.Scale==1.5) end end
+click('Graphique : inactif')
+for i=1,61 do render.RenderStepped:Fire(1/60) end
+for i=1,45 do render.RenderStepped:Fire(1) end
+local bars=0
+for _,o in ipairs(objects) do
+ if o.Name and o.Name:match('^FPSSample') then bars=bars+1;assert(o.Size.Y.Scale==1) end
+end
+assert(bars==30 and find('FPS : 30 dernieres mesures'))
+function player:GetNetworkPing() error('ping absent') end
+for i=1,31 do render.RenderStepped:Fire(1) end
+for _,o in ipairs(objects) do if o.Name and o.Name:match('^PingSample') then assert(o.Size.Y.Scale==0) end end
+for i=1,9 do field('Nom du profil').Text='P'..i;click('Enregistrer / remplacer le profil') end
+field('Nom du profil').Text='Trop';click('Enregistrer / remplacer le profil');assert(find('Limite : 10 profils.'))
+field('Nom du profil').Text='Grand';click('Tout arreter');assert(connectionsActive()==0)
+""")
+saved_profiles=lua.globals().files['blockspin-settings-v1.json']
+profile_data=json.loads(saved_profiles)
+assert len(profile_data['profiles'])==10
+assert profile_data['profiles']['Grand']['scale']==1.5
+assert profile_data['profiles']['Grand']['overlayMode']=='ping'
+lua=runtime(saved_profiles)
+lua.execute("click('Reinitialiser les reglages');click('Tout arreter')")
+assert len(json.loads(lua.globals().files['blockspin-settings-v1.json'])['profiles'])==10
+for extra in ({'scale':False},{'scale':1.51},{'overlayMode':'bad'},{'graph':'yes'},{'profiles':False}):
+    invalid=json.dumps({**data,**extra})
+    lua=runtime(invalid)
+    lua.execute("click('Tout arreter')")
+    assert lua.globals().files['blockspin-settings-v1.json']==invalid
+print('OK : echelle, modes overlay, profils independants, limite de profils, restauration, reset, recentrage, graphiques bornes et reglages invalides')
+
+lua=runtime(saved_profiles)
+lua.execute("""
+for _,o in ipairs(objects) do if o.PlaceholderText and o.PlaceholderText:find('Nom du profil',1,true) then o.Text='P1' end end
+click('Supprimer le profil');click('Charger le profil');assert(find('Profil introuvable.'));click('Tout arreter')
+""")
+assert len(json.loads(lua.globals().files['blockspin-settings-v1.json'])['profiles'])==9
+print('OK : suppression de profil sauvegardee')
+
+legacy={k:v for k,v in data.items() if k not in ('scale','overlayMode','graph','profiles')}
+lua=runtime(json.dumps(legacy))
+lua.execute("assert(find('Raccourci : F6')); assert(find('Mesures overlay : FPS + ping')); click('Tout arreter')")
+assert json.loads(lua.globals().files['blockspin-settings-v1.json'])['scale']==1
+print('OK : anciens reglages compatibles')

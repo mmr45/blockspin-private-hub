@@ -25,3 +25,12 @@ Aucun cas ci-dessous n'a été exécuté dans Roblox ou Xeno.
 18. Avec un fichier JSON invalide : démarrage par défaut, erreur visible, fichier non écrasé. Avec écriture refusée : erreur visible et interface utilisable.
 19. Tester le diagnostic : erreur volontaire visible, historique limité à cinq erreurs. Tester un ping indisponible : `N/D`.
 20. Cliquer « Tout arrêter et fermer » : menu et overlay supprimés. Relancer deux fois : un seul ensemble actif.
+
+## Version 0.3.0 — nouveaux cas, non exécutés dans Roblox/Xeno
+
+21. Essayer les échelles 75, 100 et 150 %. Vérifier textes, boutons, déplacement et redimensionnement ; réduire la fenêtre Roblox. Refuser 74, 151 et les saisies non numériques.
+22. Tester les trois modes de l'overlay et relancer : mode restauré. Menu masqué, overlay toujours indépendant.
+23. Activer le graphique : deux histogrammes FPS/ping avec unités. Attendre plus de 30 mesures : seules les dernières restent visibles. Ping indisponible : colonne vide. Désactiver puis réactiver.
+24. Enregistrer deux profils différents ; modifier les réglages, charger chacun puis relancer. Vérifier l'indépendance des profils, le remplacement d'un nom et la suppression. Refuser noms vides, noms trop longs et onzième profil.
+25. Recentrer après déplacement : menu centré, overlay centré en haut. Réinitialiser après changement de touche : retour à Maj droite, échelle 100 %, graphiques/overlay désactivés et profils conservés.
+26. Charger un ancien fichier 0.2.0 valide : conserver les préférences existantes et appliquer les valeurs par défaut des nouveaux champs.
