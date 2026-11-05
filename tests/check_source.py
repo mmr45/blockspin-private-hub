@@ -9,7 +9,7 @@ cycle = (root / "src/cycle.lua").read_text(encoding="utf-8")
 assert "--@@DEFAULT_DATA@@" not in source, "src/main.lua non regenere : lancer build.py"
 assert "local DEFAULT_DATA = {" in source
 assert source.replace("\r\n", "\n").count("\n") > cycle.count("\n"), "main.lua doit contenir les donnees injectees"
-assert "local VERSION = '0.9.0'" in source
+assert "local VERSION = '0.9.1'" in source
 for name in ("Accueil", "Index", "Reglages"):
     assert f"page('{name}')" in source, name
 assert "player:Kick(" in source  # seule sortie volontaire : option poisson rare

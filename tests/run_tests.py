@@ -40,6 +40,11 @@ def new_lua():
     return lua
 
 
+# Luau et Lua limitent a 200 les variables locales du bloc principal : garder une marge.
+probe = new_lua().eval("function(s) local f, e = load(s, \"=main\") return e end")
+margin = next((n - 1 for n in range(0, 200) if probe(SCRIPT + "\n" + "".join("local zz%d=1\n" % i for i in range(n)))), 199)
+check("compilation : marge de variables locales >= 10", margin >= 10, margin)
+
 print("== Tests purs (donnees + pilote sur modele cinematique simplifie) ==")
 lua = new_lua()
 lua.execute((ROOT / "tests" / "test_pure.lua").read_text(encoding="utf-8"))

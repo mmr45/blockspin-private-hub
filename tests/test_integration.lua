@@ -256,3 +256,50 @@ M.click('Poisson rare')
 local hudText = M.new('TextLabel', 'Shop', M.pg:FindFirstChild('HUD'), { Text = 'Legendary Rod for sale', AbsolutePosition = Vector2.new(0, 0), AbsoluteSize = Vector2.new(100, 20) })
 M.run(5)
 check('texte "Legendary" hors peche : ignore', M.kicked == nil)
+
+-- 13. Annonces (bulles en haut)
+local function toasts(M)
+    local h = M.ourGui():FindFirstChild('Toasts')
+    local out = {}
+    for _, c in ipairs(h:GetChildren()) do if c.Name == 'Toast' then out[#out + 1] = c:FindFirstChildOfClass('TextLabel').Text end end
+    return out
+end
+M, S = fresh()
+M.capLabel.Text = '5/18'
+M.run(6)
+local before = #toasts(M)
+M.capLabel.Text = '18/18'
+M.run(1.5)
+local tl = toasts(M)
+check('annonce : inventaire plein', #tl == before + 1 and tl[#tl]:find('Inventaire plein', 1, true) ~= nil, table.concat(tl, ' / '))
+M.capLabel.Text = '4/18'
+M.run(1.5)
+tl = toasts(M)
+check('annonce : inventaire libere', tl[#tl]:find('libere', 1, true) ~= nil, table.concat(tl, ' / '))
+for i = 1, 5 do S.toast('test ' .. i, 'info') end
+check('annonces : 3 au maximum a l\'ecran', #toasts(M) == 3)
+S.toast('test 5', 'info')
+check('annonces : pas de doublon en rafale', #toasts(M) == 3 and toasts(M)[3] == 'test 5')
+M.run(5)
+check('annonces : disparaissent apres ~4 s', #toasts(M) == 0)
+M.click('Annonces en haut')
+S.toast('ne doit pas apparaitre', 'info')
+check('annonces desactivables', #toasts(M) == 0 and S.ui.toasts == false)
+
+-- 14. Performance : pas de parcours complet de l'ecran en boucle
+M, S = fresh()
+M.baitLabel.Parent = nil -- compteur d'appats absent de l'ecran
+M.run(3)
+M.pgScans = 0
+M.run(20)
+check('perf : appats introuvables -> au plus 2 parcours complets en 20 s', M.pgScans <= 2, M.pgScans)
+M.baitLabel.Parent = M.pg:FindFirstChild('Items'):FindFirstChild('ItemsHolder'):FindFirstChild('BaitRow')
+M.run(11)
+check('perf : appats retrouves au parcours suivant', S.baitCount == 16, S.baitCount)
+M.pgScans = 0
+M.baitLabel.Text = 'x15'
+M.run(2)
+check('perf : appats suivis via le cache, sans parcours', S.baitCount == 15 and M.pgScans == 0, M.pgScans)
+M.baitLabel.Text = 'x0'
+M.run(2)
+check('appats x0 : arret + annonce', S.baitEmpty and toasts(M)[#toasts(M)]:find('appats', 1, true) ~= nil)

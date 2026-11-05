@@ -1,10 +1,10 @@
--- BlockSpin Hub v0.9.0
+-- BlockSpin Hub v0.9.1
 -- Peche auto (logique v0.6.8 conservee) + cycle vente/ATM par conduite NATIVE sur route
 -- (touches simulees W/A/S/D, aucun deplacement de CFrame, aucune teleportation).
 -- Aucun passage sous la carte : non implemente volontairement (voir README_v080.md).
 -- Arret complet : getgenv().BlockSpinCycle080.stop()
 -- Arret d'urgence du cycle/conduite (le script reste charge) : F12
-local VERSION = '0.9.0'
+local VERSION = '0.9.1'
 local E = (getgenv and getgenv()) or _G
 
 ---------------------------------------------------------------------------
@@ -399,11 +399,18 @@ local function setState(state, detail)
     if state ~= S.state then logLine('ETAT ' .. S.state .. ' -> ' .. state .. (detail and (' : ' .. detail) or '')) end
     S.state = state
     S.detail = detail or ''
-    if stateLabel and stateLabel.Parent then stateLabel.Text = state .. (S.detail ~= '' and (' | ' .. S.detail) or '') end
+    if S.toast and state ~= S.lastToastState then
+        if state == 'ERROR' then S.toast(S.detail ~= '' and S.detail or 'Erreur', 'error')
+        elseif state == 'NO_BAIT' then S.toast('Plus d\'appats : lancers arretes', 'error') end
+    end
+    S.lastToastState = state
+    local txt = state .. (S.detail ~= '' and (' | ' .. S.detail) or '')
+    if stateLabel and stateLabel.Parent and stateLabel.Text ~= txt then stateLabel.Text = txt end
 end
 local function update(detail) -- detail sans changer d'etat (compat v0.6.8)
     S.detail = detail
-    if stateLabel and stateLabel.Parent then stateLabel.Text = S.state .. ' | ' .. tostring(detail) end
+    local txt = S.state .. ' | ' .. tostring(detail)
+    if stateLabel and stateLabel.Parent and stateLabel.Text ~= txt then stateLabel.Text = txt end
 end
 
 ---------------------------------------------------------------------------
@@ -754,9 +761,22 @@ end
 ---------------------------------------------------------------------------
 -- 11. INVENTAIRE / APPATS (logique v0.6.8)
 ---------------------------------------------------------------------------
-local function readCapacity()
+local capCache, capNextScan = nil, 0
+local function parseCap(obj)
+    local a, b = tostring(obj.Text):match('^%s*(%d+)%s*/%s*(%d+)%s*$')
+    a, b = tonumber(a), tonumber(b)
+    if a and b and b == S.inventoryLimit and a <= b then return a, b end
+end
+local function readCapacity(force)
     local items = pg:FindFirstChild('Items')
     if not items then return nil end
+    if capCache and capCache.obj.Parent and capCache.obj:IsDescendantOf(items) then
+        local a, b = parseCap(capCache.obj)
+        if a then return { count = a, limit = b, depth = capCache.depth, path = capCache.path } end
+    end
+    -- etiquette perdue : recherche complete, mais pas plus d'une fois toutes les 3 s
+    if not force and os.clock() < capNextScan then return nil end
+    capNextScan = os.clock() + 3
     local best
     for _, obj in ipairs(items:GetDescendants()) do
         if obj:IsA('TextLabel') or obj:IsA('TextButton') then
@@ -765,10 +785,11 @@ local function readCapacity()
             if a and b and b == S.inventoryLimit and a <= b then
                 local depth, p = 0, obj
                 while p and p ~= items do depth = depth + 1; p = p.Parent end
-                if not best or depth < best.depth then best = { count = a, limit = b, depth = depth, path = obj:GetFullName() } end
+                if not best or depth < best.depth then best = { count = a, limit = b, depth = depth, path = obj:GetFullName(), obj = obj } end
             end
         end
     end
+    if best then capCache = { obj = best.obj, depth = best.depth, path = best.path }; capNextScan = 0 end
     return best
 end
 S.readCapacity = readCapacity
@@ -783,9 +804,11 @@ function S.checkInventory()
         S.inventoryFull = (info.count >= info.limit)
         if S.inventoryFull and not wasFull then
             logLine('INVENTAIRE ' .. S.inventoryText .. ' : lancers suspendus')
+            if S.toast then S.toast('Inventaire plein (' .. S.inventoryText .. ')' .. (S.autoCycle and ' : vente auto' or ' : peche en pause'), 'warn') end
         elseif wasFull and not S.inventoryFull then
             S.sellAttempts = 0; lastCast = -1e6
             logLine('INVENTAIRE ' .. S.inventoryText .. ' : peche deverrouillee')
+            if S.toast then S.toast('Inventaire libere (' .. S.inventoryText .. ') : la peche reprend', 'ok') end
         end
     end
     return info
@@ -795,26 +818,39 @@ function S.setFishCount(n)
     S.fishCount = math.floor(n); S.inventoryFull = (S.fishCount >= S.inventoryLimit)
     return true
 end
+local baitCache, baitNextScan = nil, 0
 local function checkBait()
     local found
-    for _, o in ipairs(pg:GetDescendants()) do
-        if (o:IsA('TextLabel') or o:IsA('TextButton')) and not ours(o) and fold(o.Text):find('prawntec', 1, true) then
-            local inline = tostring(o.Text):match('[xX]%s*(%d+)%s*$')
-            if inline then found = tonumber(inline) end
-            local parent = o.Parent
-            if found == nil and parent then
-                for _, near in ipairs(parent:GetDescendants()) do
-                    if near:IsA('TextLabel') or near:IsA('TextButton') then
-                        local c = tostring(near.Text):match('^%s*[xX]%s*(%d+)%s*$')
-                        if c then found = tonumber(c); break end
+    if baitCache and baitCache.Parent then
+        local c = tostring(baitCache.Text):match('[xX]%s*(%d+)%s*$')
+        found = tonumber(c)
+    end
+    if found == nil then
+        if os.clock() < baitNextScan then return end
+        baitNextScan = os.clock() + 10
+        baitCache = nil
+        for _, o in ipairs(pg:GetDescendants()) do
+            if (o:IsA('TextLabel') or o:IsA('TextButton')) and fold(o.Text):find('prawntec', 1, true) and not ours(o) then
+                local inline = tostring(o.Text):match('[xX]%s*(%d+)%s*$')
+                if inline then found = tonumber(inline); baitCache = o end
+                local parent = o.Parent
+                if found == nil and parent then
+                    for _, near in ipairs(parent:GetDescendants()) do
+                        if near:IsA('TextLabel') or near:IsA('TextButton') then
+                            local c = tostring(near.Text):match('^%s*[xX]%s*(%d+)%s*$')
+                            if c then found = tonumber(c); baitCache = near; break end
+                        end
                     end
                 end
             end
+            if found ~= nil then break end
         end
-        if found ~= nil then break end
     end
     if found ~= nil then
-        if S.baitCount ~= found then logLine('Appats lus : x' .. found) end
+        if S.baitCount ~= found then
+            logLine('Appats lus : x' .. found)
+            if found == 0 and S.toast then S.toast('Plus d\'appats (x0) : lancers arretes', 'error') end
+        end
         S.baitCount = found; S.baitEmpty = (found == 0); S.baitUnknown = false
     end
 end
@@ -859,7 +895,7 @@ local function holdButton(button, seconds, tok)
     return ok, err
 end
 local function sellAll(tok)
-    local before = readCapacity()
+    local before = readCapacity(true)
     if not before then return false, 'compteur inventaire illisible avant vente' end
     for attempt = 1, 2 do
         local button, deadline = sellButton(), os.clock() + 10
@@ -875,7 +911,7 @@ local function sellAll(tok)
         if not held2 then return false, 'maintien du clic : ' .. tostring(why) end
         local t1 = os.clock() + 4
         while os.clock() < t1 and alive(tok) do
-            local after = readCapacity()
+            local after = readCapacity(true)
             if after and after.count < before.count then
                 return true, string.format('vente CONFIRMEE : %d/%d -> %d/%d', before.count, before.limit, after.count, after.limit)
             end
@@ -1005,7 +1041,7 @@ local function runCycle(manual)
         end
         local ok, err = pcall(function()
             -- preconditions
-            local info = readCapacity()
+            local info = readCapacity(true)
             if not manual and (not info or info.count < info.limit) then return fail('PRECONDITION', 'inventaire pas plein / illisible') end
             if not carValid() then return fail('PRECONDITION', 'aucune voiture memorisee : monte au volant puis bouton "Memoriser voiture"') end
             local D = S.data
@@ -1035,6 +1071,7 @@ local function runCycle(manual)
             S.sellStage = whyS
             if not okS then return fail('VENTE', whyS) end
             logLine(whyS)
+            if S.toast then S.toast('Vente reussie : ' .. tostring(whyS):gsub('vente CONFIRMEE : ', ''), 'ok') end
 
             setState('NAVIGATING_TO_ATM', '')
             local okA, whyA = walkTo(v3(D.atm), 4, tok, 'ATM')
@@ -1071,6 +1108,7 @@ local function runCycle(manual)
             S.inventoryFull = false; S.sellAttempts = 0; lastCast = -1e6
             S.cycleRunning = false; S.cycleFailures = 0
             setState('FISHING', 'cycle complet termine')
+            if S.toast then S.toast('Cycle termine : retour a la peche', 'ok') end
         end)
         if not ok then fail('ERREUR INTERNE', err) end
         releaseAll(); releaseMouse()
@@ -1185,8 +1223,8 @@ end
 ---------------------------------------------------------------------------
 local SETTINGS_FILE = 'blockspin-settings-v1.json'
 local ui = { accent = 'C5F277', hotkey = 'RightShift', scale = 1, metrics = true, overlay = false, hideInMinigame = true,
-    speedPreset = 'Rapide', rareAction = 'none', rarePurple = true }
-local PREF_KEYS = { 'accent', 'hotkey', 'scale', 'metrics', 'overlay', 'hideInMinigame', 'speedPreset', 'rareAction', 'rarePurple',
+    speedPreset = 'Rapide', rareAction = 'none', rarePurple = true, toasts = true }
+local PREF_KEYS = { 'accent', 'hotkey', 'scale', 'metrics', 'overlay', 'hideInMinigame', 'speedPreset', 'rareAction', 'rarePurple', 'toasts',
     'position', 'size', 'overlayPosition' }
 local RARE_ACTIONS = { none = 'ne rien faire', leave = 'quitter le serveur', sell = 'aller vendre' }
 local settingsRaw -- fichier lu en entier : profils et champs du hub 0.4.0 conserves
@@ -1199,7 +1237,7 @@ local function readPrefs(d, into)
     if type(d.accent) == 'string' and d.accent:match('^%x%x%x%x%x%x$') then into.accent = d.accent end
     if validKeyName(d.hotkey) then into.hotkey = d.hotkey end
     if isNum(d.scale) and d.scale >= 0.75 and d.scale <= 1.5 then into.scale = d.scale end
-    for _, k in ipairs({ 'metrics', 'overlay', 'hideInMinigame', 'rarePurple' }) do if type(d[k]) == 'boolean' then into[k] = d[k] end end
+    for _, k in ipairs({ 'metrics', 'overlay', 'hideInMinigame', 'rarePurple', 'toasts' }) do if type(d[k]) == 'boolean' then into[k] = d[k] end end
     for _, p in ipairs(SPEED_PRESETS) do if d.speedPreset == p.name then into.speedPreset = p.name end end
     if RARE_ACTIONS[d.rareAction] then into.rareAction = d.rareAction end
     for _, f in ipairs({ 'position', 'size', 'overlayPosition' }) do
@@ -1277,6 +1315,57 @@ local window = make('Frame', { Name = 'Window', BackgroundColor3 = theme.backgro
     ClipsDescendants = true, Active = true }, gui)
 local menuScale = make('UIScale', { Scale = ui.scale }, window)
 round(window, 12); outline(window)
+
+-- ANNONCES : bulles "verre" en haut au centre (au plus 3, disparaissent apres 4 s)
+do -- annonces (portee fermee : limite de 200 locales)
+local TweenService = game:GetService('TweenService')
+local toastHolder = make('Frame', { Name = 'Toasts', BackgroundTransparency = 1, AnchorPoint = Vector2.new(0.5, 0),
+    Position = UDim2.new(0.5, 0, 0, 14), Size = UDim2.fromOffset(400, 200), ZIndex = 20 }, gui)
+make('UIListLayout', { Padding = UDim.new(0, 8), HorizontalAlignment = Enum.HorizontalAlignment.Center,
+    SortOrder = Enum.SortOrder.LayoutOrder }, toastHolder)
+local TOAST_COLORS = { ok = Color3.fromRGB(110, 230, 150), warn = Color3.fromRGB(255, 196, 90),
+    error = Color3.fromRGB(255, 110, 110), rare = Color3.fromRGB(190, 120, 255), info = Color3.fromRGB(120, 200, 255) }
+local toastSeq, lastToastText, lastToastAt = 0, nil, -100
+local function tween(o, time, props)
+    local ok = pcall(function() TweenService:Create(o, TweenInfo.new(time, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props):Play() end)
+    if not ok then for k, v in pairs(props) do pcall(function() o[k] = v end) end end
+end
+function S.toast(text, kind)
+    if not ui.toasts or not toastHolder.Parent then return end
+    text = tostring(text)
+    if text == lastToastText and os.clock() - lastToastAt < 3 then return end -- pas de doublon en rafale
+    lastToastText, lastToastAt = text, os.clock()
+    toastSeq = toastSeq + 1
+    local cards = {}
+    for _, c in ipairs(toastHolder:GetChildren()) do if c.Name == 'Toast' then cards[#cards + 1] = c end end
+    table.sort(cards, function(a, b) return a.LayoutOrder < b.LayoutOrder end)
+    while #cards >= 3 do table.remove(cards, 1):Destroy() end
+    local card = make('Frame', { Name = 'Toast', LayoutOrder = toastSeq, Size = UDim2.fromOffset(380, 44),
+        BackgroundColor3 = Color3.fromRGB(18, 20, 26), BackgroundTransparency = 1, BorderSizePixel = 0, ZIndex = 20 }, toastHolder)
+    round(card, 22)
+    make('UIGradient', { Rotation = 90, Color = ColorSequence.new(Color3.fromRGB(255, 255, 255), Color3.fromRGB(170, 180, 200)) }, card)
+    local stroke = make('UIStroke', { Color = Color3.fromRGB(255, 255, 255), Thickness = 1, Transparency = 1 }, card)
+    local dot = make('Frame', { Size = UDim2.fromOffset(10, 10), Position = UDim2.new(0, 16, 0.5, -5),
+        BackgroundColor3 = TOAST_COLORS[kind] or TOAST_COLORS.info, BorderSizePixel = 0, BackgroundTransparency = 1, ZIndex = 21 }, card)
+    round(dot, 5)
+    local txt = make('TextLabel', { BackgroundTransparency = 1, Position = UDim2.fromOffset(36, 0), Size = UDim2.new(1, -50, 1, 0),
+        Text = text, TextColor3 = Color3.fromRGB(245, 247, 250), TextTransparency = 1, TextSize = 14, Font = Enum.Font.GothamMedium,
+        TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true, TextTruncate = Enum.TextTruncate.AtEnd, ZIndex = 21 }, card)
+    tween(card, 0.25, { BackgroundTransparency = 0.35 })
+    tween(stroke, 0.25, { Transparency = 0.65 })
+    tween(dot, 0.25, { BackgroundTransparency = 0 })
+    tween(txt, 0.25, { TextTransparency = 0 })
+    task.delay(4, function()
+        if not card.Parent then return end
+        tween(card, 0.35, { BackgroundTransparency = 1 })
+        tween(stroke, 0.35, { Transparency = 1 })
+        tween(dot, 0.35, { BackgroundTransparency = 1 })
+        tween(txt, 0.35, { TextTransparency = 1 })
+        task.delay(0.4, function() if card.Parent then card:Destroy() end end)
+    end)
+end
+end
+
 local function fitWindow()
     local v, sc = viewportSize(), ui.scale
     local maxW, maxH = math.max(1, v.X / sc), math.max(1, v.Y / sc)
@@ -1328,7 +1417,7 @@ end
 local toggles = {}
 local function toggle(parent, textFn, fn, height)
     local b = button(parent, textFn(), function(b) fn(); b.Text = textFn() end, height)
-    table.insert(toggles, function() b.Text = textFn() end)
+    table.insert(toggles, function() local t = textFn(); if b.Text ~= t then b.Text = t end end)
     return b
 end
 function S.refreshToggles() for _, f in ipairs(toggles) do pcall(f) end end
@@ -1424,6 +1513,16 @@ logLabel.TextSize = 11; logLabel.Font = Enum.Font.Code
 ---------------------------------------------------------------------------
 -- Sources web consultees le 2026-11-05 (sites de fans, NON verifiees en jeu) :
 -- treyexgaming.com/blockspin-fishing-update-2-guide, blockspin-wiki.wiki, TikTok.
+S.fishLog = {}
+local FISHLOG_FILE = 'blockspin_fishlog.json'
+local refreshFishLog
+pcall(function()
+    if type(readfile) == 'function' and type(isfile) == 'function' and isfile(FISHLOG_FILE) then
+        local d = HttpService:JSONDecode(readfile(FISHLOG_FILE))
+        if type(d) == 'table' then for k, v in pairs(d) do if type(k) == 'string' and isNum(v) then S.fishLog[k] = v end end end
+    end
+end)
+do -- index (portee fermee : limite de 200 locales)
 local FISH_WEB = {
     { 'Salmon (saumon)', 'normal', '~138-162 $' },
     { 'Pufferfish', '?', '~8 000 $' },
@@ -1437,14 +1536,6 @@ local PLANTS_WEB = {
     { 'Mais (Corn)', 'graine ~250 selon une video, non verifie' },
     { 'Citrouille (Pumpkin)', 'gains annonces par des joueurs, non verifies' },
 }
-S.fishLog = {}
-local FISHLOG_FILE = 'blockspin_fishlog.json'
-pcall(function()
-    if type(readfile) == 'function' and type(isfile) == 'function' and isfile(FISHLOG_FILE) then
-        local d = HttpService:JSONDecode(readfile(FISHLOG_FILE))
-        if type(d) == 'table' then for k, v in pairs(d) do if type(k) == 'string' and isNum(v) then S.fishLog[k] = v end end end
-    end
-end)
 local index = page('Index')
 section(index, 'POISSONS (liste web, non verifiee en jeu)')
 local lines = {}
@@ -1452,7 +1543,7 @@ for _, f in ipairs(FISH_WEB) do lines[#lines + 1] = string.format('%s  |  %s  | 
 notice(index, table.concat(lines, '\n'), #FISH_WEB * 16 + 14)
 section(index, 'VUS PENDANT TES PECHES (textes apparus apres une prise)')
 local seenLabel = notice(index, '', 60)
-local function refreshFishLog()
+refreshFishLog = function()
     local names = {}
     for k, v in pairs(S.fishLog) do names[#names + 1] = { k, v } end
     table.sort(names, function(a, b) return a[2] > b[2] end)
@@ -1466,6 +1557,7 @@ section(index, 'PLANTES (liste web, non verifiee ; culture auto non disponible)'
 lines = {}
 for _, p in ipairs(PLANTS_WEB) do lines[#lines + 1] = p[1] .. '  |  ' .. p[2] end
 notice(index, table.concat(lines, '\n'), #PLANTS_WEB * 16 + 14)
+end
 
 ---------------------------------------------------------------------------
 -- REGLAGES
@@ -1505,6 +1597,8 @@ local op = ui.overlayPosition or { x = 12, y = 70 }
 overlay.Position = UDim2.fromOffset(op.x, op.y)
 toggle(settingsPage, function() return 'Compteur FPS a l\'ecran : ' .. (ui.overlay and 'oui' or 'non') end,
     function() ui.overlay = not ui.overlay; overlay.Visible = ui.overlay; saveSettings() end)
+toggle(settingsPage, function() return 'Annonces en haut de l\'ecran : ' .. (ui.toasts and 'oui' or 'non') end,
+    function() ui.toasts = not ui.toasts; saveSettings(); if ui.toasts then S.toast('Annonces activees', 'info') end end)
 toggle(settingsPage, function() return 'Detecter aussi les textes violets : ' .. (ui.rarePurple and 'oui' or 'non') end,
     function() ui.rarePurple = not ui.rarePurple; saveSettings() end)
 local capturing = false
@@ -1669,6 +1763,7 @@ end)
 -- POISSON RARE : texte nouveau apparu pendant/apres le mini-jeu contenant un mot
 -- de rarete, ou (option) ecrit en violet. Heuristique NON verifiee en jeu.
 ---------------------------------------------------------------------------
+do -- poisson rare (portee fermee : limite de 200 locales)
 local RARE_WORDS = { 'legendary', 'legendaire', 'mythic', 'mythique', 'omega', 'epic', 'epique' }
 local catchBaseline, catchWindowUntil, rareCooldownUntil = nil, 0, 0
 local function isPurple(c)
@@ -1700,6 +1795,7 @@ function S.onMinigameEnd(now) catchWindowUntil = now + 8 end
 local function rareTrigger(text)
     rareCooldownUntil = os.clock() + 60
     logLine('POISSON RARE detecte : "' .. text:sub(1, 50) .. '" -> ' .. RARE_ACTIONS[ui.rareAction])
+    S.toast('Poisson rare : ' .. text:sub(1, 40), 'rare')
     if ui.rareAction == 'leave' then
         task.delay(1, function()
             if S.running then pcall(function() player:Kick('BlockSpin hub : poisson rare detecte (' .. text:sub(1, 40) .. ')') end) end
@@ -1731,6 +1827,7 @@ function S.scanCatch(now)
         refreshFishLog()
         if type(writefile) == 'function' then pcall(function() writefile(FISHLOG_FILE, HttpService:JSONEncode(S.fishLog)) end) end
     end
+end
 end
 
 -- FPS (1 mesure par seconde) + infos voiture
@@ -1826,11 +1923,11 @@ end
 local nextCheck, fullSince = 0, nil
 local function refreshInfo()
     if not (infoLabel and infoLabel.Parent) then return end
-    local d = S.cfg.drive
-    infoLabel.Text = string.format('Inventaire %s | Appats %s | Clics %d | Lancers %d\nVoiture : %s | Donnees : %s\nVitesse cible %.0f/%.0f | Erreurs touches %d | Cycle auto %s',
-        S.inventoryText, S.baitUnknown and 'inconnus' or ('x' .. tostring(S.baitCount)), S.clicks, S.castAttempts,
-        S.car and S.car.name or 'non memorisee', S.dataSource == DATA_FILE and 'fichier' or 'defauts',
-        d.cruiseSpeed, d.turnSpeed, S.keyErrors, S.autoCycle and 'ON' or 'OFF')
+    local txt = string.format('Inventaire : %s      Appats : %s\nVoiture : %s\nLancers : %d      Clics mini-jeu : %d%s',
+        S.inventoryText, S.baitUnknown and '?' or ('x' .. tostring(S.baitCount)),
+        S.car and S.car.name or 'monte au volant une fois pour la memoriser',
+        S.castAttempts, S.clicks, S.keyErrors > 0 and ('      Erreurs touches : ' .. S.keyErrors) or '')
+    if infoLabel.Text ~= txt then infoLabel.Text = txt end
 end
 
 table.insert(conns, RunService.Heartbeat:Connect(function()
@@ -1873,8 +1970,9 @@ table.insert(conns, RunService.Heartbeat:Connect(function()
         if not S.fishingEnabled or S.cycleRunning then return end
         local panel, target, needle = findMinigame()
         -- le menu ne doit pas recevoir les clics du mini-jeu (clic a la position du curseur)
+        if panel then S.minigameSeenAt = os.clock() end
         if panel and ui.hideInMinigame and window.Visible then window.Visible = false; S.hiddenForMinigame = true end
-        if not panel and S.hiddenForMinigame then window.Visible = true; S.hiddenForMinigame = false end
+        if not panel and S.hiddenForMinigame and os.clock() - (S.minigameSeenAt or 0) > 1.5 then window.Visible = true; S.hiddenForMinigame = false end
         if not panel then
             if minigameWasVisible then minigameWasVisible = false; lastMinigameEnd = os.clock(); S.onMinigameEnd(lastMinigameEnd) end
             if currentPanel then resetPanel(nil) end

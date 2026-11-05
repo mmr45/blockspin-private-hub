@@ -113,6 +113,7 @@ end
 function Inst:IsA(c) return self.ClassName == c or c == 'Instance' or (ISA[c] and ISA[c][self.ClassName] ~= nil) or false end
 function Inst:GetChildren() local o = {}; for i, c in ipairs(self._children) do o[i] = c end; return o end
 function Inst:GetDescendants()
+    if self == M.pg then M.pgScans = (M.pgScans or 0) + 1 end
     local o = {}
     local function rec(x) for _, c in ipairs(x._children) do o[#o + 1] = c; rec(c) end end
     rec(self); return o
@@ -272,7 +273,11 @@ function Path:CreatePath()
     function p:GetWaypoints() return { { Position = p.a, Action = Enum.PathWaypointAction.Walk }, { Position = p.b, Action = Enum.PathWaypointAction.Walk } } end
     return p
 end
-local services = { Players = Players, RunService = RunService, UserInputService = UIS, VirtualInputManager = VIM, HttpService = Http, PathfindingService = Path }
+TweenInfo = { new = function(...) return { ... } end }
+ColorSequence = { new = function(...) return { ... } end }
+local TweenService = {}
+function TweenService:Create(o, info, props) return { Play = function() for k, v in pairs(props) do o[k] = v end end } end
+local services = { TweenService = TweenService, Players = Players, RunService = RunService, UserInputService = UIS, VirtualInputManager = VIM, HttpService = Http, PathfindingService = Path }
 game = DataModel
 function DataModel:GetService(n) return services[n] or error('service inconnu ' .. n) end
 M.RunService, M.UIS = RunService, UIS

@@ -1,4 +1,4 @@
-# BlockSpin Hub 0.9.0 : pêche + cycle vente/ATM
+# BlockSpin Hub 0.9.1 : pêche + cycle vente/ATM
 
 Le hub fusionne deux choses :
 - l'interface préparée dans ce dépôt (0.4.0) ;
