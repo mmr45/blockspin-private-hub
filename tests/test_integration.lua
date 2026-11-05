@@ -165,15 +165,15 @@ check('anciennes touches F3-F11 : sans effet', M.writes == w0 and S.recording ==
     and S.data.fish[1] == fish0 and #M.keyLog == 0)
 local win = S.window
 local function pageVisible(n) local p = M.ourGui():FindFirstChild(n, true); return p and p.Visible end
-check('menu : 3 onglets, Accueil ouvert', win.Visible and pageVisible('Accueil') and not pageVisible('Index') and not pageVisible('Reglages'))
+check('menu : 6 onglets, Fishing ouvert', win.Visible and pageVisible('Fishing') and not pageVisible('Statistics') and not pageVisible('Settings'))
 check('accueil : boutons essentiels presents', M.findButton('[ON]  Peche automatique') and M.findButton('[OFF] Vente auto')
     and M.findButton('Poisson rare : ne rien faire') and M.findButton('Vitesse voiture : Rapide') and M.findButton('STOP'))
 M.press('RightShift')
 check('RightShift : masque le menu', win.Visible == false)
 M.press('RightShift')
 check('RightShift : reaffiche le menu', win.Visible == true)
-M.click('Index')
-check('onglet Index : affiche', pageVisible('Index') and not pageVisible('Accueil'))
+M.click('Statistics')
+check('onglet Statistics : affiche', pageVisible('Statistics') and not pageVisible('Fishing'))
 M.click('Touche pour masquer')
 M.press('K')
 check('raccourci modifiable : K', S.ui.hotkey == 'K' and M.fs['blockspin-settings-v1.json'] ~= nil)
@@ -208,15 +208,15 @@ local saved = py_json_decode(M.fs['blockspin-settings-v1.json'])
 check('palette : accent violet sauve, profils et champs 0.4.0 conserves', saved.accent == 'B07CFF' and saved.profiles ~= nil
     and saved.profiles.Perso ~= nil and saved.overlayMode == 'both')
 M.findTextBox('Nom du profil').Text = 'Moi'
-M.click('Enregistrer')
+M.click('Enregistrer le profil')
 M.clickNamed('Couleur5EC8FF')
 M.click('Vitesse voiture')
 check('changement apres profil', S.ui.accent == '5EC8FF' and S.speedPreset == 'Max moteur')
-M.click('Charger')
+M.click('Charger le profil')
 check('profil Moi recharge : couleur et vitesse', S.ui.accent == 'B07CFF' and S.speedPreset == 'Rapide')
 saved = py_json_decode(M.fs['blockspin-settings-v1.json'])
 check('profil sauve dans le fichier', saved.profiles.Moi ~= nil and saved.profiles.Moi.accent == 'B07CFF' and saved.profiles.Perso ~= nil)
-M.click('Supprimer')
+M.click('Supprimer le profil')
 saved = py_json_decode(M.fs['blockspin-settings-v1.json'])
 check('profil supprime', saved.profiles.Moi == nil and saved.profiles.Perso ~= nil)
 local M2, S2 = fresh({ files = { ['blockspin-settings-v1.json'] = '{casse' } })
@@ -303,3 +303,4 @@ check('perf : appats suivis via le cache, sans parcours', S.baitCount == 15 and 
 M.baitLabel.Text = 'x0'
 M.run(2)
 check('appats x0 : arret + annonce', S.baitEmpty and toasts(M)[#toasts(M)]:find('appats', 1, true) ~= nil)
+
