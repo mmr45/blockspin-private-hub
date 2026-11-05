@@ -30,3 +30,8 @@ Légende de la colonne Résultat :
 | Auto Seeds | — | — | — | Non implémenté | — | aucune observation de l'interface |
 | writefile/readfile | API exécuteur | — | v0.6.8 | Confirmé (v0.6.8) | « saved 19 points » | dossier réel inconnu |
 | Interface hub (onglets, boutons, RightShift, réglages) | hub 0.4.0 relié au cycle | — | v0.8.0 | Simulé | maquette (88 vérifications) | jamais affichée dans Roblox |
+| Préréglages de vitesse (Rapide, Max moteur) | W/A/S/D, W tenu en ligne droite | au volant | v0.9.0 | Simulé | modèle (vmax 65) | 12-13 km/h signalés en v0.8.0 ; unité studs/s ↔ km/h inconnue |
+| Poisson rare → quitter / vendre | nouveau texte avec mot-clé ou violet après une prise | action choisie | v0.9.0 | Simulé | maquette | textes réels de prise inconnus |
+| Profils de réglages | blockspin-settings-v1.json | writefile | v0.9.0 | Simulé | maquette | — |
+| Index poissons/plantes | sites de fans + textes observés | — | v0.9.0 | Données web non vérifiées | treyexgaming, blockspin-wiki | liste incomplète |
+| Achat à distance | — | — | — | Refusé | — | contournerait la vérification serveur |

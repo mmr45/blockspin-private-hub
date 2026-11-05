@@ -46,3 +46,6 @@ Public. Branche `main` = hub 0.4.0 (HEAD 4aec1c4). La 0.8.0 est sur la branche `
 3. Settings → Diagnostic devant l'ATM, écran DÉPÔT ouvert, puis devant le vendeur, puis près de la voiture : obtenir la vraie hiérarchie GUI et les vrais prompts. Adapter ensuite `depositAll` / `enterCar`.
 4. Cycle complet avec « Cycle auto ».
 5. Auto Seeds : Diagnostic au potager, puis concevoir un module isolé.
+
+## v0.9.0 (2026-11-05, branche `v0.9-hub`)
+Retours utilisateur sur la 0.8.0 (menu chargé par loader après fusion PR #1) : voiture bloquée vers 12-13 km/h, menu trop chargé, overlay FPS caché sous les boutons Roblox. Changements : menu en 3 onglets, préréglages de vitesse (défaut Rapide 30/9, Max moteur), palette, profils, poisson rare (quitter/vendre), index web. Refusés : achat à distance, passage sous la carte (redemandé). Non testé en jeu.
