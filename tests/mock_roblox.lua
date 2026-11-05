@@ -56,7 +56,7 @@ end
 UDim = { new = function(s, o) return { Scale = s or 0, Offset = o or 0 } end }
 local function ud2(xs, xo, ys, yo) return { X = UDim.new(xs, xo), Y = UDim.new(ys, yo) } end
 UDim2 = { new = ud2, fromOffset = function(x, y) return ud2(0, x, 0, y) end, fromScale = function(x, y) return ud2(x, 0, y, 0) end }
-Color3 = { fromRGB = function() return {} end }
+Color3 = { fromRGB = function(r, g, b) return { R = (r or 0) / 255, G = (g or 0) / 255, B = (b or 0) / 255 } end }
 local function enumGroup(name)
     return setmetatable({}, { __index = function(t, k)
         local v = setmetatable({ Name = k }, { __tostring = function() return 'Enum.' .. name .. '.' .. k end })
@@ -215,6 +215,7 @@ local RunService = { Heartbeat = Signal(), RenderStepped = Signal() }
 local UIS = { InputBegan = Signal(), InputChanged = Signal(), InputEnded = Signal(), WindowFocusReleased = Signal(), focused = nil }
 workspace.CurrentCamera = { ViewportSize = Vector2.new(1920, 1080) }
 function player:GetNetworkPing() return 0.05 end
+function player:Kick(msg) M.kicked = msg end
 function UIS:GetFocusedTextBox() return self.focused end
 function UIS:GetMouseLocation() return Vector2.new(M.mouseX or 0, M.mouseY or 0) end
 local function inside(btn, x, y)
@@ -348,6 +349,11 @@ function M.click(prefix)
     if not b then error('bouton introuvable : ' .. prefix) end
     b.Activated:Fire()
     return b
+end
+function M.clickNamed(name)
+    local b = M.ourGui():FindFirstChild(name, true)
+    if not b then error('introuvable : ' .. name) end
+    b.Activated:Fire()
 end
 function M.findTextBox(placeholderPrefix)
     for _, o in ipairs(M.ourGui():GetDescendants()) do

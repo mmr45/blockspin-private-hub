@@ -1,10 +1,10 @@
--- BlockSpin Cycle v0.8.0
+-- BlockSpin Hub v0.9.0
 -- Peche auto (logique v0.6.8 conservee) + cycle vente/ATM par conduite NATIVE sur route
 -- (touches simulees W/A/S/D, aucun deplacement de CFrame, aucune teleportation).
 -- Aucun passage sous la carte : non implemente volontairement (voir README_v080.md).
 -- Arret complet : getgenv().BlockSpinCycle080.stop()
 -- Arret d'urgence du cycle/conduite (le script reste charge) : F12
-local VERSION = '0.8.0'
+local VERSION = '0.9.0'
 local E = (getgenv and getgenv()) or _G
 
 ---------------------------------------------------------------------------
@@ -140,13 +140,15 @@ function Driver:pointAt(s)
 end
 function Driver:speedLimit()
     local c = self.cfg
-    local _, _, hx, hz = self:pointAt(self.s)
     local limit = c.cruiseSpeed
-    for _, ahead in ipairs({ 6, 12, 18, 24, 32, 40, 50 }) do
-        if self.s + ahead > self.total then break end
+    -- virage LOCAL (sur 14 studs) a chaque distance devant : une longue courbe douce
+    -- ne bride plus la vitesse comme dans la v0.8.0
+    for _, ahead in ipairs({ 0, 6, 12, 18, 24, 32, 40, 50, 60, 75 }) do
+        if self.s + ahead + 4 > self.total then break end
         local _, _, ax, az = self:pointAt(self.s + ahead)
-        local turn = math.abs(signedAngle(hx, hz, ax, az))
-        local vAt = c.cruiseSpeed - (c.cruiseSpeed - c.turnSpeed) * clamp(turn / 1.0, 0, 1)
+        local _, _, bx, bz = self:pointAt(math.min(self.total, self.s + ahead + 14))
+        local turn = math.abs(signedAngle(ax, az, bx, bz))
+        local vAt = c.cruiseSpeed - (c.cruiseSpeed - c.turnSpeed) * clamp(turn / 0.8, 0, 1)
         local allowed = math.sqrt(vAt * vAt + 2 * c.decel * ahead)
         if allowed < limit then limit = allowed end
     end
@@ -271,7 +273,7 @@ function Driver:step(o)
         cmd.left = turning and self.filtered < 0
         local limit = math.min(self:speedLimit(),
             c.cruiseSpeed - (c.cruiseSpeed - c.turnSpeed) * clamp(math.abs(angle) / c.angleSlow, 0, 1))
-        if c.nativeStraight and limit >= c.cruiseSpeed - 0.01 and math.abs(angle) < 0.12 then limit = math.huge end
+        if c.nativeStraight and limit >= c.cruiseSpeed - 0.01 and math.abs(angle) < 0.15 then limit = math.huge end
         self.limit = limit
         if fwdSpeed < limit - 0.5 then cmd.fwd = true
         elseif c.brake and fwdSpeed > limit + c.brakeMargin and fwdSpeed > 2 then cmd.back = true end
@@ -1062,6 +1064,33 @@ function S.setSpeed(straight, curve)
     return true
 end
 function S.setNative(on) S.cfg.drive.nativeStraight = not not on; logLine('Mode natif ligne droite : ' .. tostring(S.cfg.drive.nativeStraight)) end
+-- Prereglages : "max moteur" garde W enfonce en ligne droite (limite = celle du jeu).
+-- Aucun attribut du vehicule n'est modifie. Plus c'est rapide, moins c'est teste.
+local SPEED_PRESETS = {
+    { name = 'Lente', cruise = 12, turn = 5, native = false },
+    { name = 'Normale', cruise = 20, turn = 7, native = false },
+    { name = 'Rapide', cruise = 30, turn = 9, native = false },
+    { name = 'Max moteur', cruise = 45, turn = 10, native = true },
+}
+S.speedPresets = SPEED_PRESETS
+S.speedPreset = 'Rapide'
+function S.setSpeedPreset(name)
+    for _, p in ipairs(SPEED_PRESETS) do
+        if p.name == name then
+            S.cfg.drive.cruiseSpeed = p.cruise; S.cfg.drive.turnSpeed = p.turn; S.cfg.drive.nativeStraight = p.native
+            S.speedPreset = p.name
+            logLine('Vitesse voiture : ' .. p.name .. (p.native and ' (W enfonce en ligne droite)' or string.format(' (%d/%d studs/s)', p.cruise, p.turn)))
+            return true
+        end
+    end
+    return false
+end
+function S.nextSpeedPreset()
+    for i, p in ipairs(SPEED_PRESETS) do
+        if p.name == S.speedPreset then return S.setSpeedPreset(SPEED_PRESETS[i % #SPEED_PRESETS + 1].name) end
+    end
+    return S.setSpeedPreset('Rapide')
+end
 
 ---------------------------------------------------------------------------
 -- 16. DIAGNOSTIC GUI / PROMPTS / VEHICULE (bouton Settings > Diagnostic)
@@ -1099,59 +1128,72 @@ function S.dumpGui()
 end
 
 ---------------------------------------------------------------------------
--- 17. INTERFACE : hub "blockspin-private-hub" 0.4.0 (theme, onglets, fenetre
--- deplacable/redimensionnable, echelle, accent, raccourci, FPS/ping, graines),
--- desormais relie au cycle. Les raccourcis F3-F11 sont remplaces par des boutons.
--- Touches conservees : raccourci d'affichage (RightShift par defaut) et F12 (urgence).
+-- 17. INTERFACE SIMPLIFIEE (theme du hub 0.4.0)
+-- 3 onglets : Accueil (l'essentiel), Index (poissons/plantes), Reglages.
+-- Les outils techniques sont dans Reglages > Avance (replie par defaut).
+-- Clavier : touche d'affichage (RightShift par defaut) et F12 (urgence) seulement.
 ---------------------------------------------------------------------------
 local SETTINGS_FILE = 'blockspin-settings-v1.json'
-local ui = { accent = 'C5F277', hotkey = 'RightShift', scale = 1, metrics = true, overlay = false, hideInMinigame = true }
-local settingsRaw -- fichier lu en entier : les champs du hub 0.4.0 (profils...) sont conserves
+local ui = { accent = 'C5F277', hotkey = 'RightShift', scale = 1, metrics = true, overlay = false, hideInMinigame = true,
+    speedPreset = 'Rapide', rareAction = 'none', rarePurple = true }
+local PREF_KEYS = { 'accent', 'hotkey', 'scale', 'metrics', 'overlay', 'hideInMinigame', 'speedPreset', 'rareAction', 'rarePurple',
+    'position', 'size', 'overlayPosition' }
+local RARE_ACTIONS = { none = 'ne rien faire', leave = 'quitter le serveur', sell = 'aller vendre' }
+local settingsRaw -- fichier lu en entier : profils et champs du hub 0.4.0 conserves
 local function validKeyName(n)
     if type(n) ~= 'string' or n == 'Escape' or n == 'Unknown' or n == 'F12' then return false end
     local ok, k = pcall(function() return Enum.KeyCode[n] end)
     return ok and k ~= nil
 end
+local function readPrefs(d, into)
+    if type(d.accent) == 'string' and d.accent:match('^%x%x%x%x%x%x$') then into.accent = d.accent end
+    if validKeyName(d.hotkey) then into.hotkey = d.hotkey end
+    if isNum(d.scale) and d.scale >= 0.75 and d.scale <= 1.5 then into.scale = d.scale end
+    for _, k in ipairs({ 'metrics', 'overlay', 'hideInMinigame', 'rarePurple' }) do if type(d[k]) == 'boolean' then into[k] = d[k] end end
+    for _, p in ipairs(SPEED_PRESETS) do if d.speedPreset == p.name then into.speedPreset = p.name end end
+    if RARE_ACTIONS[d.rareAction] then into.rareAction = d.rareAction end
+    for _, f in ipairs({ 'position', 'size', 'overlayPosition' }) do
+        local p = d[f]
+        if type(p) == 'table' and isNum(p.x) and isNum(p.y) then into[f] = { x = p.x, y = p.y } end
+    end
+end
 local settingsWritable = true
 local okSettings, settingsErr = pcall(function()
     if type(readfile) == 'function' and type(isfile) == 'function' and isfile(SETTINGS_FILE) then
         local raw = readfile(SETTINGS_FILE)
-        assert(type(raw) == 'string' and #raw <= 32768, 'fichier de reglages trop grand')
+        assert(type(raw) == 'string' and #raw <= 65536, 'fichier de reglages trop grand')
         local d = HttpService:JSONDecode(raw)
         assert(type(d) == 'table', 'format de reglages invalide')
         settingsRaw = d
-        if type(d.accent) == 'string' and d.accent:match('^%x%x%x%x%x%x$') then ui.accent = d.accent end
-        if validKeyName(d.hotkey) then ui.hotkey = d.hotkey end
-        if isNum(d.scale) and d.scale >= 0.75 and d.scale <= 1.5 then ui.scale = d.scale end
-        for _, k in ipairs({ 'metrics', 'overlay', 'hideInMinigame' }) do if type(d[k]) == 'boolean' then ui[k] = d[k] end end
-        for _, f in ipairs({ 'position', 'size', 'overlayPosition' }) do
-            local p = d[f]
-            if type(p) == 'table' and isNum(p.x) and isNum(p.y) then ui[f] = { x = p.x, y = p.y } end
-        end
+        readPrefs(d, ui)
     end
 end)
 if not okSettings then
-    -- comme le hub 0.4.0 : fichier preserve, ecriture desactivee pour la session
     settingsWritable = false
     logLine(SETTINGS_FILE .. ' illisible (' .. tostring(settingsErr) .. ') : fichier preserve, reglages non sauvegardes cette session')
 end
+-- l'ancien overlay (12,12) etait cache sous les boutons Roblox en haut a gauche
+if ui.overlayPosition and ui.overlayPosition.y < 64 and ui.overlayPosition.x < 330 then ui.overlayPosition = nil end
 S.ui = ui
+local profiles = (type(settingsRaw) == 'table' and type(settingsRaw.profiles) == 'table') and settingsRaw.profiles or {}
 local function saveSettings()
     if type(writefile) ~= 'function' or not settingsWritable then return false end
     local out = {}
     if type(settingsRaw) == 'table' then for k, v in pairs(settingsRaw) do out[k] = v end end
     out.schema = 1
-    for _, k in ipairs({ 'accent', 'hotkey', 'scale', 'metrics', 'overlay', 'hideInMinigame', 'position', 'size', 'overlayPosition' }) do out[k] = ui[k] end
+    for _, k in ipairs(PREF_KEYS) do out[k] = ui[k] end
+    out.profiles = profiles
     local ok, err = pcall(function() writefile(SETTINGS_FILE, HttpService:JSONEncode(out)) end)
     if not ok then logLine('Reglages non sauvegardes : ' .. tostring(err)) end
     return ok
 end
+S.setSpeedPreset(ui.speedPreset)
 
 local theme = {
     background = Color3.fromRGB(14, 16, 18), surface = Color3.fromRGB(23, 26, 29),
     control = Color3.fromRGB(31, 35, 39), border = Color3.fromRGB(47, 53, 59),
     text = Color3.fromRGB(241, 244, 239), muted = Color3.fromRGB(166, 175, 181),
-    warning = Color3.fromRGB(233, 191, 115),
+    danger = Color3.fromRGB(150, 40, 40),
 }
 local function hexColor(h) return Color3.fromRGB(tonumber(h:sub(1, 2), 16), tonumber(h:sub(3, 4), 16), tonumber(h:sub(5, 6), 16)) end
 theme.accent = hexColor(ui.accent)
@@ -1185,33 +1227,31 @@ local window = make('Frame', { Name = 'Window', BackgroundColor3 = theme.backgro
     ClipsDescendants = true, Active = true }, gui)
 local menuScale = make('UIScale', { Scale = ui.scale }, window)
 round(window, 12); outline(window)
-local layoutMenu
 local function fitWindow()
     local v, sc = viewportSize(), ui.scale
     local maxW, maxH = math.max(1, v.X / sc), math.max(1, v.Y / sc)
-    local w = clamp(window.Size.X.Offset, math.min(480, maxW), maxW)
-    local h = clamp(window.Size.Y.Offset, math.min(380, maxH), maxH)
+    local w = clamp(window.Size.X.Offset, math.min(380, maxW), maxW)
+    local h = clamp(window.Size.Y.Offset, math.min(360, maxH), maxH)
     window.Size = UDim2.fromOffset(w, h)
     window.Position = UDim2.fromOffset(clamp(window.Position.X.Offset, 0, math.max(0, v.X - w * sc)),
         clamp(window.Position.Y.Offset, 0, math.max(0, v.Y - h * sc)))
-    if layoutMenu then layoutMenu() end
 end
--- par defaut a gauche : le centre de l'ecran reste libre pour le mini-jeu
-local size0 = ui.size or { x = 620, y = 480 }
-local pos0 = ui.position or { x = 16, y = 100 }
+local size0 = ui.size or { x = 430, y = 500 }
+local pos0 = ui.position or { x = 16, y = 90 }
 window.Size = UDim2.fromOffset(size0.x, size0.y)
 window.Position = UDim2.fromOffset(pos0.x, pos0.y)
 
+local accentItems = {}
 local function label(parent, text, height)
-    return make('TextLabel', { Size = UDim2.new(1, 0, 0, height or 36), BackgroundTransparency = 1, Text = text,
+    return make('TextLabel', { Size = UDim2.new(1, 0, 0, height or 32), BackgroundTransparency = 1, Text = text,
         TextWrapped = true, TextColor3 = theme.muted, TextSize = 13, Font = Enum.Font.Gotham,
         TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Center }, parent)
 end
-local function button(parent, text, fn)
-    local b = make('TextButton', { Size = UDim2.new(1, 0, 0, 36), BackgroundColor3 = theme.control, BorderSizePixel = 0,
-        Text = text, TextColor3 = theme.text, TextSize = 13, Font = Enum.Font.GothamMedium, TextWrapped = true,
+local function button(parent, text, fn, height)
+    local b = make('TextButton', { Size = UDim2.new(1, 0, 0, height or 40), BackgroundColor3 = theme.control, BorderSizePixel = 0,
+        Text = text, TextColor3 = theme.text, TextSize = 14, Font = Enum.Font.GothamMedium, TextWrapped = true,
         AutoButtonColor = true, TextXAlignment = Enum.TextXAlignment.Left }, parent)
-    round(b, 7); outline(b); inset(b, 14)
+    round(b, 8); outline(b); inset(b, 14)
     connect(b.Activated, function() fn(b) end)
     return b
 end
@@ -1222,10 +1262,9 @@ local function textbox(parent, placeholder)
     round(t, 7); outline(t); inset(t, 14)
     return t
 end
-local accentItems = {}
 local function section(parent, text)
-    local h = label(parent, text, 26)
-    h.TextSize, h.TextColor3, h.Font = 10, theme.accent, Enum.Font.GothamBold
+    local h = label(parent, text, 24)
+    h.TextSize, h.TextColor3, h.Font = 11, theme.accent, Enum.Font.GothamBold
     table.insert(accentItems, h)
     return h
 end
@@ -1237,111 +1276,276 @@ local function notice(parent, text, height)
     return n
 end
 local toggles = {}
-local function toggle(parent, textFn, fn)
-    local b = button(parent, textFn(), function(b) fn(); b.Text = textFn() end)
+local function toggle(parent, textFn, fn, height)
+    local b = button(parent, textFn(), function(b) fn(); b.Text = textFn() end, height)
     table.insert(toggles, function() b.Text = textFn() end)
     return b
 end
 function S.refreshToggles() for _, f in ipairs(toggles) do pcall(f) end end
-local function grid(parent, items)
-    local holder = make('Frame', { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, math.ceil(#items / 2) * 44) }, parent)
+local function grid(parent, items, h)
+    h = h or 38
+    local holder = make('Frame', { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, math.ceil(#items / 2) * (h + 6)) }, parent)
     for i, it in ipairs(items) do
-        local b = button(holder, it[1], it[2])
-        b.Size = UDim2.new(0.5, -4, 0, 38)
-        b.Position = UDim2.new(((i - 1) % 2) * 0.5, ((i - 1) % 2) * 4, 0, math.floor((i - 1) / 2) * 44)
+        local b = button(holder, it[1], it[2], h)
+        b.Size = UDim2.new(0.5, -4, 0, h)
+        b.Position = UDim2.new(((i - 1) % 2) * 0.5, ((i - 1) % 2) * 4, 0, math.floor((i - 1) / 2) * (h + 6))
     end
     return holder
 end
 
--- en-tete
-local top = make('Frame', { Size = UDim2.new(1, 0, 0, 58), BackgroundColor3 = theme.surface, BorderSizePixel = 0, Active = true }, window)
-local title = label(top, 'BLOCKSPIN', 30)
-title.Position = UDim2.fromOffset(18, 6); title.Size = UDim2.new(1, -250, 0, 30)
-title.TextSize, title.Font, title.TextColor3 = 20, Enum.Font.GothamBold, theme.text
-local sub = label(top, 'PRIVATE HUB  /  v' .. VERSION .. '  /  peche + cycle', 16)
-sub.Position = UDim2.fromOffset(18, 36); sub.Size = UDim2.new(1, -250, 0, 16); sub.TextSize = 10
-local metrics = label(top, '  FPS : -- | Ping : N/D', 28)
-metrics.Size = UDim2.fromOffset(200, 28); metrics.Position = UDim2.new(1, -214, 0, 15)
-metrics.TextSize, metrics.TextColor3, metrics.BackgroundColor3, metrics.BackgroundTransparency = 12, theme.text, theme.control, 0
-round(metrics, 6); outline(metrics)
+-- en-tete : titre (sert a deplacer) + FPS
+local top = make('Frame', { Size = UDim2.new(1, 0, 0, 50), BackgroundColor3 = theme.surface, BorderSizePixel = 0, Active = true }, window)
+local title = label(top, 'BLOCKSPIN', 26)
+title.Position = UDim2.fromOffset(16, 4); title.Size = UDim2.new(1, -170, 0, 26)
+title.TextSize, title.Font, title.TextColor3 = 18, Enum.Font.GothamBold, theme.text
+local sub = label(top, 'v' .. VERSION .. '  /  ' .. ui.hotkey .. ' : masquer', 14)
+sub.Position = UDim2.fromOffset(16, 30); sub.Size = UDim2.new(1, -170, 0, 14); sub.TextSize = 10
+local metrics = label(top, 'FPS --', 24)
+metrics.Size = UDim2.fromOffset(140, 24); metrics.Position = UDim2.new(1, -152, 0, 13)
+metrics.TextSize, metrics.TextColor3, metrics.TextXAlignment = 11, theme.muted, Enum.TextXAlignment.Right
 metrics.Visible = ui.metrics
--- barre laterale
-local side = make('Frame', { Position = UDim2.fromOffset(0, 58), Size = UDim2.new(0, 138, 1, -100),
+-- onglets en haut (3 seulement)
+local tabBar = make('Frame', { Position = UDim2.fromOffset(10, 56), Size = UDim2.new(1, -20, 0, 34), BackgroundTransparency = 1 }, window)
+-- pied : etat du script
+local footer = make('Frame', { Size = UDim2.new(1, 0, 0, 40), Position = UDim2.new(0, 0, 1, -40),
     BackgroundColor3 = theme.surface, BorderSizePixel = 0 }, window)
-local tabs = make('Frame', { BackgroundTransparency = 1, Position = UDim2.fromOffset(10, 12), Size = UDim2.new(1, -20, 1, -24) }, side)
-make('UIListLayout', { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }, tabs)
--- pied : etat du cycle (toujours visible)
-local footer = make('Frame', { Size = UDim2.new(1, 0, 0, 42), Position = UDim2.new(0, 0, 1, -42),
-    BackgroundColor3 = theme.background, BorderSizePixel = 0 }, window)
-make('Frame', { Size = UDim2.new(1, 0, 0, 1), BackgroundColor3 = theme.border, BorderSizePixel = 0 }, footer)
-stateLabel = label(footer, 'demarrage', 40)
-stateLabel.Position = UDim2.fromOffset(16, 1); stateLabel.Size = UDim2.new(1, -60, 0, 40)
+stateLabel = label(footer, 'demarrage', 38)
+stateLabel.Position = UDim2.fromOffset(14, 1); stateLabel.Size = UDim2.new(1, -50, 0, 38)
 stateLabel.TextSize, stateLabel.TextColor3, stateLabel.Font = 12, theme.accent, Enum.Font.Code
 table.insert(accentItems, stateLabel)
-local resize = make('TextButton', { Text = '<>', TextSize = 14, TextColor3 = theme.text, BackgroundColor3 = theme.control,
-    Size = UDim2.fromOffset(26, 26), Position = UDim2.new(1, -30, 1, -34), ZIndex = 5 }, window)
+local resize = make('TextButton', { Text = '<>', TextSize = 13, TextColor3 = theme.text, BackgroundColor3 = theme.control,
+    Size = UDim2.fromOffset(24, 24), Position = UDim2.new(1, -30, 1, -32), ZIndex = 5 }, window)
 
-local pages, tabButtons, tabMarks, pageOrder = {}, {}, {}, {}
-local activePage = 'Cycle'
+local pages, tabButtons, pageOrder = {}, {}, {}
+local activePage = 'Accueil'
 local function updateTabs()
     for name, b in pairs(tabButtons) do
         local sel = name == activePage
-        b.BackgroundColor3 = sel and theme.control or theme.surface
-        b.TextColor3 = sel and theme.accent or theme.muted
-        tabMarks[name].Visible = sel
+        b.BackgroundColor3 = sel and theme.accent or theme.control
+        b.TextColor3 = sel and theme.background or theme.text
         pages[name].Visible = sel
     end
 end
-local function page(name, subtitle)
+local TAB_NAMES = { 'Accueil', 'Index', 'Reglages' }
+local function page(name)
     local body = make('ScrollingFrame', { Name = name, BackgroundTransparency = 1, BorderSizePixel = 0,
-        Position = UDim2.fromOffset(156, 70), Size = UDim2.new(1, -170, 1, -124), CanvasSize = UDim2.new(),
+        Position = UDim2.fromOffset(12, 98), Size = UDim2.new(1, -24, 1, -146), CanvasSize = UDim2.new(),
         AutomaticCanvasSize = Enum.AutomaticSize.Y, ScrollBarThickness = 3, ScrollBarImageColor3 = theme.border, Visible = false }, window)
     make('UIListLayout', { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }, body)
     make('UIPadding', { PaddingRight = UDim.new(0, 6), PaddingBottom = UDim.new(0, 12) }, body)
     pages[name] = body
     pageOrder[#pageOrder + 1] = name
-    local tb = button(tabs, name, function() activePage = name; updateTabs() end)
-    tb.LayoutOrder = #pageOrder
+    local i = #pageOrder
+    local tb = make('TextButton', { Size = UDim2.new(1 / #TAB_NAMES, -4, 1, 0), Position = UDim2.new((i - 1) / #TAB_NAMES, 2, 0, 0),
+        BackgroundColor3 = theme.control, BorderSizePixel = 0, Text = name, TextColor3 = theme.text, TextSize = 13,
+        Font = Enum.Font.GothamBold }, tabBar)
+    round(tb, 8)
+    connect(tb.Activated, function() activePage = name; updateTabs() end)
     tabButtons[name] = tb
-    tabMarks[name] = make('Frame', { Size = UDim2.fromOffset(3, 16), Position = UDim2.new(0, -10, 0.5, -8),
-        BackgroundColor3 = theme.accent, BorderSizePixel = 0, Visible = false }, tb)
-    table.insert(accentItems, tabMarks[name])
-    local heading = label(body, name, 30)
-    heading.Font, heading.TextSize, heading.TextColor3 = Enum.Font.GothamBold, 22, theme.text
-    label(body, subtitle, 20)
     return body
 end
 
--- Onglet CYCLE ---------------------------------------------------------------
-local cyclePage = page('Cycle', 'Peche automatique, vente, ATM, retour')
-infoLabel = notice(cyclePage, '', 62)
-section(cyclePage, 'AUTOMATISATION')
-toggle(cyclePage, function() return 'Peche automatique : ' .. (S.fishingEnabled and 'ACTIVE' or 'arretee') end,
-    function() S.fishingEnabled = not S.fishingEnabled end)
-toggle(cyclePage, function() return 'Cycle vente/ATM a 18/18 : ' .. (S.autoCycle and 'ACTIF' or 'inactif') end,
-    function() S.autoCycle = not S.autoCycle; S.cycleFailures = 0; logLine('Cycle auto ' .. (S.autoCycle and 'active' or 'desactive')) end)
-grid(cyclePage, {
-    { 'Lancer un cycle maintenant', function() S.cycleFailures = 0; runCycle(true) end },
-    { 'Annuler tout (F12)', function() S.cancel() end },
-    { 'Reprendre apres erreur', function() if not S.resume() then logLine('Inventaire encore plein : reprise refusee') end end },
-    { 'Relancer le cycle', function() S.retryCycle() end },
+---------------------------------------------------------------------------
+-- ACCUEIL
+---------------------------------------------------------------------------
+local home = page('Accueil')
+infoLabel = notice(home, '', 58)
+toggle(home, function() return (S.fishingEnabled and '[ON]  ' or '[OFF] ') .. 'Peche automatique' end,
+    function() S.fishingEnabled = not S.fishingEnabled end, 44)
+toggle(home, function() return (S.autoCycle and '[ON]  ' or '[OFF] ') .. 'Vente auto quand l\'inventaire est plein' end,
+    function() S.autoCycle = not S.autoCycle; S.cycleFailures = 0; logLine('Vente auto ' .. (S.autoCycle and 'activee' or 'desactivee')) end, 44)
+toggle(home, function() return 'Poisson rare : ' .. RARE_ACTIONS[ui.rareAction] end,
+    function()
+        local order = { none = 'leave', leave = 'sell', sell = 'none' }
+        ui.rareAction = order[ui.rareAction]; saveSettings()
+        logLine('Poisson rare (violet / legendaire) : ' .. RARE_ACTIONS[ui.rareAction])
+    end, 44)
+toggle(home, function() return 'Vitesse voiture : ' .. S.speedPreset end,
+    function() S.nextSpeedPreset(); ui.speedPreset = S.speedPreset; saveSettings() end, 44)
+local stopBtn = button(home, 'STOP  (tout annuler, F12)', function() S.cancel() end, 44)
+stopBtn.BackgroundColor3 = theme.danger
+stopBtn.TextXAlignment = Enum.TextXAlignment.Center
+section(home, 'JOURNAL')
+logLabel = notice(home, '', 128)
+logLabel.TextSize = 11; logLabel.Font = Enum.Font.Code
+
+---------------------------------------------------------------------------
+-- INDEX : poissons et plantes
+---------------------------------------------------------------------------
+-- Sources web consultees le 2026-11-05 (sites de fans, NON verifiees en jeu) :
+-- treyexgaming.com/blockspin-fishing-update-2-guide, blockspin-wiki.wiki, TikTok.
+local FISH_WEB = {
+    { 'Salmon (saumon)', 'normal', '~138-162 $' },
+    { 'Pufferfish', '?', '~8 000 $' },
+    { 'Oarfish', 'Legendaire', '~68 000 $' },
+    { 'Shark (requin)', '?', '~222 750-275 000 $' },
+    { 'Anglerfish', 'rare', '~334 000 $' },
+    { 'Megalodon', '?', '?' },
+    { 'Omega Shark', 'Omega (plus rare)', '?' },
+}
+local PLANTS_WEB = {
+    { 'Mais (Corn)', 'graine ~250 selon une video, non verifie' },
+    { 'Citrouille (Pumpkin)', 'gains annonces par des joueurs, non verifies' },
+}
+S.fishLog = {}
+local FISHLOG_FILE = 'blockspin_fishlog.json'
+pcall(function()
+    if type(readfile) == 'function' and type(isfile) == 'function' and isfile(FISHLOG_FILE) then
+        local d = HttpService:JSONDecode(readfile(FISHLOG_FILE))
+        if type(d) == 'table' then for k, v in pairs(d) do if type(k) == 'string' and isNum(v) then S.fishLog[k] = v end end end
+    end
+end)
+local index = page('Index')
+section(index, 'POISSONS (liste web, non verifiee en jeu)')
+local lines = {}
+for _, f in ipairs(FISH_WEB) do lines[#lines + 1] = string.format('%s  |  %s  |  %s', f[1], f[2], f[3]) end
+notice(index, table.concat(lines, '\n'), #FISH_WEB * 16 + 14)
+section(index, 'VUS PENDANT TES PECHES (textes apparus apres une prise)')
+local seenLabel = notice(index, '', 60)
+local function refreshFishLog()
+    local names = {}
+    for k, v in pairs(S.fishLog) do names[#names + 1] = { k, v } end
+    table.sort(names, function(a, b) return a[2] > b[2] end)
+    local t = {}
+    for i = 1, math.min(15, #names) do t[#t + 1] = names[i][1] .. '  x' .. names[i][2] end
+    seenLabel.Text = #t == 0 and 'Rien encore : la liste se remplit pendant que tu peches.' or table.concat(t, '\n')
+    seenLabel.Size = UDim2.new(1, 0, 0, math.max(40, #t * 16 + 14))
+end
+refreshFishLog()
+section(index, 'PLANTES (liste web, non verifiee ; culture auto non disponible)')
+lines = {}
+for _, p in ipairs(PLANTS_WEB) do lines[#lines + 1] = p[1] .. '  |  ' .. p[2] end
+notice(index, table.concat(lines, '\n'), #PLANTS_WEB * 16 + 14)
+
+---------------------------------------------------------------------------
+-- REGLAGES
+---------------------------------------------------------------------------
+local settingsPage = page('Reglages')
+section(settingsPage, 'COULEUR')
+local PALETTE = { 'C5F277', '5EC8FF', 'B07CFF', 'FF6FA8', 'FF9F43', 'FFD84D', '4DE0A0', 'F1F4EF' }
+local function applyAccent(hex)
+    theme.accent = hexColor(hex)
+    for _, it in ipairs(accentItems) do it.TextColor3 = theme.accent end
+    updateTabs()
+end
+local swatches = make('Frame', { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 34) }, settingsPage)
+for i, hex in ipairs(PALETTE) do
+    local h = hex
+    local sw = make('TextButton', { Name = 'Couleur' .. h, Text = '', BackgroundColor3 = hexColor(h), BorderSizePixel = 0,
+        Size = UDim2.new(1 / #PALETTE, -6, 1, 0), Position = UDim2.new((i - 1) / #PALETTE, 3, 0, 0) }, swatches)
+    round(sw, 8)
+    connect(sw.Activated, function() ui.accent = h; applyAccent(h); saveSettings() end)
+end
+toggle(settingsPage, function() return 'Taille du menu : ' .. math.floor(ui.scale * 100 + 0.5) .. ' %' end,
+    function()
+        local nextScale = { [75] = 1, [100] = 1.25, [125] = 1.5, [150] = 0.75 }
+        ui.scale = nextScale[math.floor(ui.scale * 100 + 0.5)] or 1
+        menuScale.Scale = ui.scale; fitWindow(); saveSettings()
+    end)
+local overlay = label(gui, 'FPS --', 26)
+overlay.Name = 'PerformanceOverlay'
+overlay.Size = UDim2.fromOffset(200, 26)
+overlay.BackgroundTransparency, overlay.BackgroundColor3, overlay.TextColor3 = 0.15, theme.background, theme.text
+overlay.TextSize, overlay.Font, overlay.Active, overlay.ZIndex = 12, Enum.Font.GothamMedium, true, 10
+overlay.TextXAlignment = Enum.TextXAlignment.Center
+round(overlay, 8); outline(overlay)
+overlay.Visible = ui.overlay
+-- sous les boutons Roblox du coin haut-gauche (sinon il etait cache)
+local op = ui.overlayPosition or { x = 12, y = 70 }
+overlay.Position = UDim2.fromOffset(op.x, op.y)
+toggle(settingsPage, function() return 'Compteur FPS a l\'ecran : ' .. (ui.overlay and 'oui' or 'non') end,
+    function() ui.overlay = not ui.overlay; overlay.Visible = ui.overlay; saveSettings() end)
+toggle(settingsPage, function() return 'Detecter aussi les textes violets : ' .. (ui.rarePurple and 'oui' or 'non') end,
+    function() ui.rarePurple = not ui.rarePurple; saveSettings() end)
+local capturing = false
+local function keyText() return 'Touche pour masquer le menu : ' .. ui.hotkey end
+local hotkeyButton = button(settingsPage, keyText(), function(b) capturing = true; b.Text = 'Appuie sur une touche... (Echap : annuler)' end)
+
+section(settingsPage, 'PROFILS (tes reglages enregistres)')
+local profileBox = textbox(settingsPage, 'Nom du profil')
+local profileList = label(settingsPage, '', 22)
+local function refreshProfiles()
+    local names = {}
+    for n in pairs(profiles) do names[#names + 1] = n end
+    table.sort(names)
+    profileList.Text = #names == 0 and 'Aucun profil.' or ('Profils : ' .. table.concat(names, ', '))
+end
+local function profileName()
+    local n = profileBox.Text:match('^%s*(.-)%s*$')
+    if n == '' or #n > 32 or n:find('%c') then logLine('Nom de profil : 1 a 32 caracteres'); return nil end
+    return n
+end
+local function applyPrefs()
+    menuScale.Scale = ui.scale
+    applyAccent(ui.accent)
+    overlay.Visible = ui.overlay
+    metrics.Visible = ui.metrics
+    S.setSpeedPreset(ui.speedPreset)
+    if ui.size then window.Size = UDim2.fromOffset(ui.size.x, ui.size.y) end
+    if ui.position then window.Position = UDim2.fromOffset(ui.position.x, ui.position.y) end
+    if ui.overlayPosition then overlay.Position = UDim2.fromOffset(ui.overlayPosition.x, ui.overlayPosition.y) end
+    sub.Text = 'v' .. VERSION .. '  /  ' .. ui.hotkey .. ' : masquer'
+    hotkeyButton.Text = keyText()
+    fitWindow(); S.refreshToggles()
+end
+grid(settingsPage, {
+    { 'Enregistrer', function()
+        local n = profileName(); if not n then return end
+        local count = 0
+        for _ in pairs(profiles) do count = count + 1 end
+        if not profiles[n] and count >= 10 then logLine('Maximum 10 profils'); return end
+        local p = {}
+        for _, k in ipairs(PREF_KEYS) do p[k] = ui[k] end
+        profiles[n] = p
+        refreshProfiles(); saveSettings(); logLine('Profil enregistre : ' .. n)
+    end },
+    { 'Charger', function()
+        local n = profileName(); if not n then return end
+        if type(profiles[n]) ~= 'table' then logLine('Profil introuvable : ' .. n); return end
+        readPrefs(profiles[n], ui)
+        applyPrefs(); saveSettings(); logLine('Profil charge : ' .. n)
+    end },
+    { 'Supprimer', function()
+        local n = profileName(); if not n then return end
+        if profiles[n] == nil then logLine('Profil introuvable : ' .. n); return end
+        profiles[n] = nil
+        refreshProfiles(); saveSettings(); logLine('Profil supprime : ' .. n)
+    end },
 })
-section(cyclePage, 'REPERES (en memoire ; sauvegarde : onglet Conduite)')
+refreshProfiles()
+
+-- AVANCE : outils de configuration et de test, replies par defaut
+local advanced = {}
+local advOpen = false
+toggle(settingsPage, function() return (advOpen and 'v ' or '> ') .. 'Avance (voiture, trajets, reperes, diagnostic)' end,
+    function()
+        advOpen = not advOpen
+        for _, o in ipairs(advanced) do o.Visible = advOpen end
+    end)
+local function adv(o) o.Visible = false; table.insert(advanced, o); return o end
+local carInfo = adv(notice(settingsPage, '', 46))
+adv(grid(settingsPage, {
+    { 'Memoriser la voiture', function() local ok, e = rememberCar(); if not ok then logLine(e) end end },
+    { 'Lancer une vente maintenant', function() S.cycleFailures = 0; runCycle(true) end },
+    { 'Test trajet ALLER', function() testDrive('aller') end },
+    { 'Test trajet RETOUR', function() testDrive('retour') end },
+}))
+adv(section(settingsPage, 'REPERES (ou tu te trouves)'))
 local function pack(cf) return { cf:GetComponents() } end
 local function mark(key, what)
     local root = getRoot()
     if not root then logLine('Personnage indisponible'); return end
     S.data[key] = pack(root.CFrame)
-    logLine(what .. ' memorise ici (' .. string.format('%.0f, %.0f, %.0f', root.Position.X, root.Position.Y, root.Position.Z) .. ')')
+    logLine(what .. ' = ici. Pense a "Sauvegarder les trajets".')
 end
 S.markFishing = function() mark('fish', 'Point de peche') end
 S.markVendor = function() mark('vendor', 'Vendeur') end
 S.markAtm = function() mark('atm', 'ATM') end
-grid(cyclePage, {
-    { 'Point de peche = ici', S.markFishing },
+adv(grid(settingsPage, {
+    { 'Peche = ici', S.markFishing },
     { 'Vendeur = ici', S.markVendor },
     { 'ATM = ici', S.markAtm },
-    { 'Visee : capture souris dans 3 s', function()
+    { 'Visee souris (3 s)', function()
         logLine('Place la souris sur l\'eau : capture dans 3 s')
         task.delay(3, function()
             if not S.running then return end
@@ -1350,169 +1554,32 @@ grid(cyclePage, {
             logLine(string.format('Visee enregistree a %.0f, %.0f', m.X, m.Y))
         end)
     end },
-    { 'Effacer la visee', function() S.baitScreenPoint = nil; logLine('Visee effacee') end },
-})
-section(cyclePage, 'JOURNAL')
-logLabel = notice(cyclePage, '', 132)
-logLabel.TextSize = 11; logLabel.Font = Enum.Font.Code
-
--- Onglet CONDUITE ------------------------------------------------------------
-local drivePage = page('Conduite', 'Touches W/A/S/D simulees, aucune teleportation')
-local carInfo = notice(drivePage, '', 46)
-grid(drivePage, {
-    { 'Memoriser la voiture (au volant)', function() local ok, e = rememberCar(); if not ok then logLine(e) end end },
-    { 'Annuler la conduite (F12)', function() S.cancel() end },
-    { 'Test ALLER (pont -> vendeur)', function() testDrive('aller') end },
-    { 'Test RETOUR (vendeur -> pont)', function() testDrive('retour') end },
-})
-section(drivePage, 'VITESSE CIBLE (studs/s, non calibree)')
-local speedBox = textbox(drivePage, 'ligne droite / virage, ex. 20/7')
-speedBox.Text = string.format('%.0f/%.0f', S.cfg.drive.cruiseSpeed, S.cfg.drive.turnSpeed)
-button(drivePage, 'Appliquer la vitesse', function()
-    local a, b = speedBox.Text:match('^%s*([%d%.]+)%s*/%s*([%d%.]+)%s*$')
-    if not a or not S.setSpeed(tonumber(a), tonumber(b)) then logLine('Vitesse invalide : ecrire par ex. 20/7'); return end
-    speedBox.Text = string.format('%.0f/%.0f', S.cfg.drive.cruiseSpeed, S.cfg.drive.turnSpeed)
-    S.refreshToggles()
-end)
-toggle(drivePage, function() return 'Mode natif en ligne droite : ' .. (S.cfg.drive.nativeStraight and 'oui' or 'non') end,
-    function() S.setNative(not S.cfg.drive.nativeStraight) end)
-section(drivePage, 'TRAJETS')
-toggle(drivePage, function() return S.recording and ('Enregistrement EN COURS : ' .. #S.recordBuffer .. ' points (arreter)') or 'Enregistrer un trajet (tampon separe)' end,
+}))
+adv(section(settingsPage, 'TRAJETS'))
+adv(toggle(settingsPage, function() return S.recording and ('Enregistrement : ' .. #S.recordBuffer .. ' points (cliquer pour arreter)') or 'Enregistrer un nouveau trajet' end,
     function()
         if not S.recording then
             S.recordBuffer = {}; S.recording = true
-            logLine('Enregistrement : DEBUT (les routes actuelles ne sont pas touchees)')
+            logLine('Enregistrement : conduis le trajet (les trajets actuels ne sont pas touches)')
         else
             S.recording = false
-            logLine('Enregistrement : ' .. #S.recordBuffer .. ' points. Choisir aller ou retour, puis sauvegarder.')
+            logLine('Enregistrement : ' .. #S.recordBuffer .. ' points. Choisis aller ou retour.')
         end
-    end)
-grid(drivePage, {
-    { 'Enregistrement -> ALLER', function() local ok, e = S.useRecording('aller'); if not ok then logLine(e) end end },
-    { 'Enregistrement -> RETOUR', function() local ok, e = S.useRecording('retour'); if not ok then logLine(e) end end },
-    { 'Sauvegarder les donnees', function() local ok, msg = saveData(); logLine('Sauvegarde : ' .. tostring(msg) .. (ok and '' or ' (ECHEC)')) end },
+    end))
+adv(grid(settingsPage, {
+    { 'Trajet enregistre = ALLER', function() local ok, e = S.useRecording('aller'); if not ok then logLine(e) end end },
+    { 'Trajet enregistre = RETOUR', function() local ok, e = S.useRecording('retour'); if not ok then logLine(e) end end },
+    { 'Sauvegarder les trajets', function() local ok, msg = saveData(); logLine('Sauvegarde : ' .. tostring(msg) .. (ok and '' or ' (ECHEC)')) end },
     { 'Importer route v0.6.8', function() local ok, msg = S.importV068(); logLine(tostring(msg)) end },
-})
-
--- Onglet FARMING (prepare dans le hub 0.4.0, pas encore relie au jeu) ---------
-local farming = page('Farming', 'Votre espace de culture')
-notice(farming, 'EN PREPARATION  /  Plantation, recolte, engrais et terre ne sont PAS relies au jeu. Il faut d\'abord un diagnostic au potager (onglet Settings).')
-section(farming, 'ACTIONS DE CULTURE')
-local actions = {}
-for _, a in ipairs({ 'Recolte', 'Plantation', 'Engrais', 'Terre' }) do
-    local name = a
-    actions[#actions + 1] = { name .. ' : en preparation', function() logLine(name .. ' : integration BlockSpin non verifiee, aucune action envoyee') end }
-end
-grid(farming, actions)
-section(farming, 'VOTRE SELECTION DE GRAINES')
-local seedSel = label(farming, 'Graine selectionnee : aucune', 30)
-local seedNames = textbox(farming, 'Graines : nom1, nom2 (liste manuelle)')
-local seedFilter = textbox(farming, 'Filtrer les noms (texte)')
-local seedList = make('Frame', { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y }, farming)
-make('UIListLayout', { Padding = UDim.new(0, 6) }, seedList)
-local seedConns, selectedSeed = {}, nil
-local function refreshSeeds()
-    for _, c in ipairs(seedConns) do c:Disconnect() end
-    seedConns = {}
-    for _, it in ipairs(seedList:GetChildren()) do if it:IsA('TextButton') then it:Destroy() end end
-    local seen, still = {}, false
-    local query = string.lower(seedFilter.Text)
-    for raw in string.gmatch(seedNames.Text, '[^,]+') do
-        local n = raw:match('^%s*(.-)%s*$')
-        if n ~= '' and not seen[n] then
-            seen[n] = true
-            if selectedSeed == n then still = true end
-            if string.find(string.lower(n), query, 1, true) then
-                local seed = n
-                local it = make('TextButton', { Size = UDim2.new(1, 0, 0, 30), BackgroundColor3 = theme.control, Text = seed,
-                    TextColor3 = theme.text, TextSize = 13, Font = Enum.Font.GothamMedium, BorderSizePixel = 0 }, seedList)
-                round(it, 7)
-                table.insert(seedConns, it.Activated:Connect(function() selectedSeed = seed; seedSel.Text = 'Graine selectionnee : ' .. seed end))
-            end
-        end
-    end
-    if not still then selectedSeed = nil; seedSel.Text = 'Graine selectionnee : aucune' end
-end
-connect(seedNames:GetPropertyChangedSignal('Text'), refreshSeeds)
-connect(seedFilter:GetPropertyChangedSignal('Text'), refreshSeeds)
-
--- Onglet FISH INDEX ------------------------------------------------------------
-local index = page('Fish Index', 'Votre carnet de captures')
-notice(index, 'Aucune espece BlockSpin verifiee pour le moment. Aucun poisson fictif ajoute.')
-
--- Onglet SETTINGS ----------------------------------------------------------------
-local settingsPage = page('Settings', 'Apparence, diagnostic, arret')
-section(settingsPage, 'APPARENCE')
-local accentBox = textbox(settingsPage, 'Accent hexadecimal : #RRGGBB')
-accentBox.Text = ui.accent
-local function applyAccent(hex)
-    theme.accent = hexColor(hex)
-    for _, it in ipairs(accentItems) do
-        if it:IsA('Frame') then it.BackgroundColor3 = theme.accent else it.TextColor3 = theme.accent end
-    end
-    updateTabs()
-end
-button(settingsPage, 'Appliquer la couleur d\'accent', function()
-    local hex = accentBox.Text:match('^#?(%x%x%x%x%x%x)$')
-    if not hex then logLine('Couleur invalide. Exemple : #A0A0A0'); return end
-    ui.accent = hex; applyAccent(hex); saveSettings()
-end)
-local scaleBox = textbox(settingsPage, 'Echelle du menu : 75 a 150 (%)')
-scaleBox.Text = tostring(math.floor(ui.scale * 100 + 0.5))
-button(settingsPage, 'Appliquer l\'echelle', function()
-    local p = tonumber(scaleBox.Text)
-    if not isNum(p) or p < 75 or p > 150 then logLine('Echelle invalide : 75 a 150 %'); return end
-    ui.scale = p / 100; menuScale.Scale = ui.scale; fitWindow(); saveSettings()
-end)
-toggle(settingsPage, function() return 'FPS / ping dans l\'en-tete : ' .. (ui.metrics and 'affiches' or 'masques') end,
-    function() ui.metrics = not ui.metrics; metrics.Visible = ui.metrics; saveSettings() end)
-local overlay = label(gui, '  FPS : -- | Ping : N/D', 30)
-overlay.Name = 'PerformanceOverlay'
-overlay.Size = UDim2.fromOffset(230, 30)
-overlay.BackgroundTransparency, overlay.BackgroundColor3, overlay.TextColor3 = 0.15, theme.background, theme.text
-overlay.TextSize, overlay.Font, overlay.Active, overlay.ZIndex = 12, Enum.Font.GothamMedium, true, 10
-round(overlay, 8); outline(overlay)
-overlay.Visible = ui.overlay
-local op = ui.overlayPosition or { x = 12, y = 12 }
-overlay.Position = UDim2.fromOffset(op.x, op.y)
-toggle(settingsPage, function() return 'Overlay FPS / ping : ' .. (ui.overlay and 'actif' or 'inactif') end,
-    function() ui.overlay = not ui.overlay; overlay.Visible = ui.overlay; saveSettings() end)
-toggle(settingsPage, function() return 'Masquer le menu pendant le mini-jeu : ' .. (ui.hideInMinigame and 'oui' or 'non') end,
-    function() ui.hideInMinigame = not ui.hideInMinigame; saveSettings() end)
-local capturing = false
-local hotkeyButton = button(settingsPage, '', function(b) capturing = true; b.Text = 'Appuyer sur une touche (Echap : annuler)' end)
-local function keyText() return 'Afficher / masquer le menu : ' .. ui.hotkey .. ' (modifier)' end
-hotkeyButton.Text = keyText()
-button(settingsPage, 'Recentrer le menu a gauche', function()
-    window.Position = UDim2.fromOffset(16, 100); fitWindow()
-    ui.position = { x = window.Position.X.Offset, y = window.Position.Y.Offset }; saveSettings()
-end)
-section(settingsPage, 'DIAGNOSTIC')
-local diagInfo = notice(settingsPage, '', 70)
-local function refreshDiag()
-    diagInfo.Text = 'BlockSpin v' .. VERSION .. ' | Xeno : compatibilite non certifiee\nDonnees : ' .. S.dataSource ..
-        '\nReglages : ' .. ((type(writefile) == 'function') and SETTINGS_FILE or 'session uniquement') ..
-        '\nErreurs touches : ' .. S.keyErrors .. (S.lastKeyError and (' (' .. S.lastKeyError:sub(1, 60) .. ')') or '')
-end
-button(settingsPage, 'Diagnostic ecran + interactions proches (fichier blockspin_diag_N.txt)', function() S.dumpGui(); refreshDiag() end)
-button(settingsPage, 'Actualiser le diagnostic', refreshDiag)
-section(settingsPage, 'SESSION')
-button(settingsPage, 'Tout arreter et fermer le script', function() S.stop() end)
-refreshDiag()
-
-layoutMenu = function()
-    local compact = window.Size.X.Offset < 560
-    local w = compact and 70 or 138
-    side.Size = UDim2.new(0, w, 1, -100)
-    for name, body in pairs(pages) do
-        body.Position = UDim2.fromOffset(w + 16, 70)
-        body.Size = UDim2.new(1, -w - 30, 1, -124)
-    end
-    for name, tb in pairs(tabButtons) do tb.Text = compact and name:sub(1, 3):upper() or name; tb.TextSize = compact and 10 or 13 end
-end
+}))
+adv(section(settingsPage, 'DIAGNOSTIC'))
+adv(grid(settingsPage, {
+    { 'Diagnostic ecran', function() S.dumpGui() end },
+    { 'Fermer le script', function() S.stop() end },
+}))
+S.window = window
 fitWindow()
 updateTabs()
-S.window = window
 
 -- deplacement (en-tete), redimensionnement (<>), overlay deplacable
 local gesture
@@ -1548,7 +1615,75 @@ connect(UIS.InputEnded, function(input)
     end
 end)
 
--- FPS / ping (1 mesure par seconde)
+---------------------------------------------------------------------------
+-- POISSON RARE : texte nouveau apparu pendant/apres le mini-jeu contenant un mot
+-- de rarete, ou (option) ecrit en violet. Heuristique NON verifiee en jeu.
+---------------------------------------------------------------------------
+local RARE_WORDS = { 'legendary', 'legendaire', 'mythic', 'mythique', 'omega', 'epic', 'epique' }
+local catchBaseline, catchWindowUntil, rareCooldownUntil = nil, 0, 0
+local function isPurple(c)
+    local ok, r, g, b = pcall(function() return c.R, c.G, c.B end)
+    if not ok or not isNum(r) or not isNum(g) or not isNum(b) then return false end
+    local mx, mn = math.max(r, g, b), math.min(r, g, b)
+    if mx < 0.35 or mx - mn < 0.25 then return false end
+    local d = mx - mn
+    local h
+    if mx == r then h = ((g - b) / d) % 6 elseif mx == g then h = (b - r) / d + 2 else h = (r - g) / d + 4 end
+    h = h * 60
+    return h >= 255 and h <= 310
+end
+local function visibleTexts()
+    local out = {}
+    for _, o in ipairs(pg:GetDescendants()) do
+        if (o:IsA('TextLabel') or o:IsA('TextButton')) and not ours(o) and shown(o) then
+            local t = tostring(o.Text)
+            if t ~= '' then out[o] = t end
+        end
+    end
+    return out
+end
+function S.onMinigameStart()
+    catchBaseline = visibleTexts()
+    catchWindowUntil = math.huge
+end
+function S.onMinigameEnd(now) catchWindowUntil = now + 8 end
+local function rareTrigger(text)
+    rareCooldownUntil = os.clock() + 60
+    logLine('POISSON RARE detecte : "' .. text:sub(1, 50) .. '" -> ' .. RARE_ACTIONS[ui.rareAction])
+    if ui.rareAction == 'leave' then
+        task.delay(1, function()
+            if S.running then pcall(function() player:Kick('BlockSpin hub : poisson rare detecte (' .. text:sub(1, 40) .. ')') end) end
+        end)
+    elseif ui.rareAction == 'sell' then
+        if not carValid() then logLine('Aller vendre impossible : aucune voiture memorisee'); return end
+        S.cycleFailures = 0
+        runCycle(true)
+    end
+end
+function S.scanCatch(now)
+    if not catchBaseline or now > catchWindowUntil then return end
+    local changed = false
+    for o, t in pairs(visibleTexts()) do
+        if catchBaseline[o] ~= t then
+            catchBaseline[o] = t
+            local f = fold(t)
+            -- index : textes courts avec des lettres (probablement le nom du poisson)
+            if #t >= 3 and #t <= 40 and f:find('%a%a') and not f:find('^[%s%d%p]*$') then
+                S.fishLog[t] = (S.fishLog[t] or 0) + 1; changed = true
+            end
+            local rare = false
+            for _, w in ipairs(RARE_WORDS) do if f:find(w, 1, true) then rare = true end end
+            if not rare and ui.rarePurple and isPurple(o.TextColor3) then rare = true end
+            if rare and ui.rareAction ~= 'none' and os.clock() > rareCooldownUntil and S.running then rareTrigger(t) end
+        end
+    end
+    if changed then
+        refreshFishLog()
+        if type(writefile) == 'function' then pcall(function() writefile(FISHLOG_FILE, HttpService:JSONEncode(S.fishLog)) end) end
+    end
+end
+
+-- FPS (1 mesure par seconde) + infos voiture
 local frames, elapsed = 0, 0
 connect(RunService.RenderStepped, function(dt)
     frames = frames + 1; elapsed = elapsed + dt
@@ -1556,14 +1691,16 @@ connect(RunService.RenderStepped, function(dt)
     if ui.metrics or ui.overlay then
         local ok, ping = pcall(function() return player:GetNetworkPing() end)
         local pingText = (ok and isNum(ping) and ping >= 0) and string.format('%.0f ms', ping * 1000) or 'N/D'
-        local txt = string.format('  FPS : %.0f | Ping : %s', frames / elapsed, pingText)
+        local txt = string.format('FPS %.0f | %s', frames / elapsed, pingText)
         metrics.Text = txt; overlay.Text = txt
     end
     if carInfo.Parent then
-        carInfo.Text = 'Voiture : ' .. (S.car and (S.car.path .. ' (forwardMaxSpeed ' .. tostring(S.car.maxSpeedAttr) .. ')') or 'non memorisee : monte au volant')
-            .. '\nConduite : ' .. tostring(S.driveStatus)
+        local seat = currentSeat()
+        carInfo.Text = 'Voiture : ' .. (S.car and S.car.name or 'non memorisee (monte au volant)')
+            .. (seat and string.format(' | vitesse %.0f studs/s', seat.AssemblyLinearVelocity.Magnitude) or '')
+            .. '\n' .. tostring(S.driveStatus)
     end
-    if activePage == 'Conduite' then S.refreshToggles() end
+    S.refreshToggles()
     frames, elapsed = 0, 0
 end)
 
@@ -1652,7 +1789,7 @@ table.insert(conns, RunService.Heartbeat:Connect(function()
         local now = os.clock()
         if now >= nextCheck then
             nextCheck = now + 0.8
-            S.checkInventory(); checkBait(); refreshInfo()
+            S.checkInventory(); checkBait(); refreshInfo(); S.scanCatch(now)
             if S.recording then
                 local seat = currentSeat()
                 if seat then
@@ -1689,11 +1826,12 @@ table.insert(conns, RunService.Heartbeat:Connect(function()
         if panel and ui.hideInMinigame and window.Visible then window.Visible = false; S.hiddenForMinigame = true end
         if not panel and S.hiddenForMinigame then window.Visible = true; S.hiddenForMinigame = false end
         if not panel then
-            if minigameWasVisible then minigameWasVisible = false; lastMinigameEnd = os.clock() end
+            if minigameWasVisible then minigameWasVisible = false; lastMinigameEnd = os.clock(); S.onMinigameEnd(lastMinigameEnd) end
             if currentPanel then resetPanel(nil) end
             tryCast(os.clock())
             return
         end
+        if not minigameWasVisible then S.onMinigameStart() end
         minigameWasVisible = true
         if panel ~= currentPanel then resetPanel(panel) end
         local x = needle.AbsolutePosition.X + needle.AbsoluteSize.X * 0.5
@@ -1755,6 +1893,7 @@ connect(UIS.InputBegan, function(input, processed)
             capturing = false
         elseif validKeyName(input.KeyCode.Name) then
             ui.hotkey = input.KeyCode.Name; capturing = false; saveSettings()
+            sub.Text = 'v' .. VERSION .. '  /  ' .. ui.hotkey .. ' : masquer'
         end
         hotkeyButton.Text = capturing and 'Choisir une touche clavier' or keyText()
         return

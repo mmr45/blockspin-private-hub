@@ -1,18 +1,18 @@
-# BlockSpin Hub 0.8.0 : pêche + cycle vente/ATM
+# BlockSpin Hub 0.9.0 : pêche + cycle vente/ATM
 
 Le hub fusionne deux choses :
 - l'interface préparée dans ce dépôt (0.4.0) ;
 - le script Auto Fish v0.6.8 et un nouveau cycle de conduite.
 
-Compatibilité Windows/Xeno non certifiée. **Aucune fonction de 0.8.0 n'a encore été testée dans Roblox.** Ce qui est confirmé, simulé ou non testé est détaillé dans `CAPABILITES.md`.
+Compatibilité Windows/Xeno non certifiée. **Aucune fonction de 0.8.0 ou 0.9.0 n'a encore été testée dans Roblox.** Ce qui est confirmé, simulé ou non testé est détaillé dans `CAPABILITES.md`.
 
 ## Lancement
 
 - Coller **tout** `src/main.lua` dans Xeno. C'est le script complet, données de trajet incluses.
-- Ou coller `loader.lua`. Il télécharge `src/main.lua` depuis la branche `main` du dépôt public : il n'aura la 0.8.0 qu'après fusion sur `main`.
+- Ou coller `loader.lua`. Il télécharge `src/main.lua` depuis la branche `main` du dépôt public : il charge la version fusionnée sur `main`.
 - Au lancement, le script arrête les anciennes versions : v0.6.x, tests de conduite 069→074, `BlockSpinTeleportConnection`, et une 0.8.0 précédente.
 
-**Arrêt complet** : Settings → « Tout arrêter et fermer le script », ou `getgenv().BlockSpinCycle080.stop()`. Cela relâche les touches et la souris, déconnecte tout, détruit le menu et l'overlay, et n'écrit aucun fichier de données.
+**Arrêt complet** : Réglages → Avancé → « Fermer le script », ou `getgenv().BlockSpinCycle080.stop()`. Cela relâche les touches et la souris, déconnecte tout, détruit le menu et l'overlay, et n'écrit aucun fichier de données.
 
 ## Clavier
 
@@ -20,38 +20,47 @@ Les raccourcis F3–F11 sont remplacés par des boutons. Il reste seulement deux
 
 | Touche | Rôle |
 |---|---|
-| `RightShift` (modifiable dans Settings) | afficher / masquer le menu |
+| `RightShift` (modifiable dans Réglages) | afficher / masquer le menu |
 | `F12` | arrêt d'urgence : annule cycle et conduite, relâche les touches, coupe le cycle auto |
 
 La conduite simule **W/A/S/D**, car W est le KeyCode confirmé pour avancer. Relâcher les touches n'arrête pas instantanément une voiture lancée.
 
-## Onglets
+## Menu (simplifié en 0.9.0)
 
-**Cycle**
-- État, inventaire, appâts, voiture mémorisée.
-- Boutons : pêche ON/OFF, cycle vente/ATM ON/OFF (désactivé au démarrage), lancer un cycle maintenant, annuler, reprendre après erreur.
-- Repères : point de pêche / vendeur / ATM « = ici ». La visée prend la position de la souris **3 s après** le clic, le temps de la placer sur l'eau.
-- Journal des 8 derniers événements.
+**Accueil** : l'essentiel, en gros boutons.
+- `[ON]/[OFF] Pêche automatique`
+- `[ON]/[OFF] Vente auto quand l'inventaire est plein` (voiture → vendeur → ATM → retour)
+- `Poisson rare : ne rien faire / quitter le serveur / aller vendre`
+- `Vitesse voiture : Lente / Normale / Rapide / Max moteur`
+- `STOP` (comme F12)
+- Journal des derniers événements.
 
-**Conduite**
-- Mémoriser la voiture : c'est aussi automatique dès que tu es au volant.
-- Test ALLER et Test RETOUR, avec départ après 3 s.
-- Vitesse cible au format `20/7`, mode natif en ligne droite.
-- Enregistrement de trajet dans un **tampon séparé**, puis « → ALLER » ou « → RETOUR ».
-- Sauvegarder les données, importer la route v0.6.8.
+**Index**
+- Poissons trouvés sur des sites de fans (non vérifiés en jeu).
+- Textes apparus pendant tes propres prises, qui se remplissent tout seuls et sont gardés dans `blockspin_fishlog.json`.
+- Plantes connues sur le web.
 
-**Farming** : l'interface 0.4.0 (actions en grille, liste et filtre de graines). **Elle n'est pas reliée au jeu.**
+**Réglages**
+- Palette de 8 couleurs, taille du menu, compteur FPS à l'écran (placé sous les boutons Roblox), détection des textes violets, touche pour masquer le menu.
+- **Profils** : nom → Enregistrer / Charger / Supprimer (10 maximum). Un profil garde la couleur, la taille, la touche, la vitesse, l'action « poisson rare » et la position du menu.
+- **Avancé** (replié) : mémoriser la voiture, lancer une vente, tests de trajet, repères pêche/vendeur/ATM, visée, enregistrement et sauvegarde des trajets, diagnostic, fermer le script.
 
-**Fish Index** : vide, aucun poisson inventé.
+## Vitesse de la voiture
 
-**Settings**
-- Accent, échelle 75–150 %, FPS/ping, overlay déplaçable.
-- Masquer le menu pendant le mini-jeu : activé par défaut, car les clics du mini-jeu partent à la position du curseur.
-- Choix de la touche d'affichage, recentrage.
-- Diagnostic : écrit `blockspin_diag_N.txt` avec les textes visibles et les ProximityPrompts à moins de 25 studs.
+Les préréglages sont **Lente** (12/5), **Normale** (20/7), **Rapide** (30/9, par défaut) et **Max moteur**. En Max moteur, W reste enfoncé en ligne droite : la limite devient celle du jeu. Le script ne modifie aucun attribut du véhicule. Le limiteur de virage de la 0.8.0, trop prudent sur les longues courbes, ne regarde plus que le virage local. Ces vitesses sont en studs/s : la conversion avec les km/h affichés en jeu n'est pas connue. Réglages → Avancé affiche la vitesse mesurée au volant pour comparer. Plus c'est rapide, moins c'est testé.
 
-Le menu se déplace par l'en-tête et se redimensionne par `<>`. Il s'ouvre à gauche pour laisser le centre libre.
+## Poisson rare (heuristique, non vérifiée en jeu)
 
+- **Fenêtre de détection** : du début du mini-jeu jusqu'à 8 s après.
+- **Ce qui déclenche** : tout **nouveau** texte affiché contenant legendary/légendaire, mythic, omega ou epic/épique, ou écrit en violet (option).
+- **Action** : quitter le serveur (`Kick` de ton propre client) ou lancer une vente.
+- **Limites** : la vente demande une voiture mémorisée ; il y a 60 s de pause entre deux déclenchements.
+- **Si rien ne se passe** à une vraie prise rare, fais un diagnostic au moment de la notification et envoie-le.
+
+## Non fait, et pourquoi
+
+- **Achat d'appâts ou de graines à distance** : cela demande d'appeler les RemoteEvents du jeu sans être au magasin, donc de contourner la vérification du serveur. Non fourni. En revanche, un trajet automatique jusqu'au magasin est possible, comme pour le vendeur : il me faut la position du magasin et un diagnostic de son écran.
+- **Culture automatique** : aucune observation de l'interface du potager pour l'instant.
 ## Cycle
 
 `INVENTORY_FULL → TO_CAR → NAVIGATING_TO_VENDOR → EXIT_CAR → WALK_TO_VENDOR → SELLING → NAVIGATING_TO_ATM → DEPOSITING → BACK_TO_CAR → RETURNING → RESUMING → FISHING`
