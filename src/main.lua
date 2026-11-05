@@ -1,5 +1,5 @@
 -- BlockSpin Private Hub: prototype client, aucune integration de jeu verifiee.
-local VERSION = "0.3.0"
+local VERSION = "0.4.0"
 local Http = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -14,7 +14,7 @@ local function unavailable(feature)
     return feature .. " : integration BlockSpin non verifiee. Aucune action envoyee."
 end
 local function defaults()
-    return {accent = "A0A0A0", hotkey = "RightShift", metrics = true, overlay = false,
+    return {accent = "C5F277", hotkey = "RightShift", metrics = true, overlay = false,
         scale = 1, overlayMode = "both", graph = false}
 end
 local preferences = defaults()
@@ -117,11 +117,27 @@ local function make(class, properties, parent)
     object.Parent = parent
     return object
 end
+local theme = {
+    background = Color3.fromRGB(14, 16, 18), surface = Color3.fromRGB(23, 26, 29),
+    control = Color3.fromRGB(31, 35, 39), border = Color3.fromRGB(47, 53, 59),
+    text = Color3.fromRGB(241, 244, 239), muted = Color3.fromRGB(166, 175, 181),
+    accent = Color3.fromRGB(197, 242, 119), warning = Color3.fromRGB(233, 191, 115)
+}
+local function round(object, radius)
+    make("UICorner", {CornerRadius = UDim.new(0, radius or 8)}, object)
+end
+local function outline(object, color)
+    return make("UIStroke", {Color = color or theme.border, Thickness = 1,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border}, object)
+end
+local function inset(object, amount)
+    make("UIPadding", {PaddingLeft = UDim.new(0, amount), PaddingRight = UDim.new(0, amount)}, object)
+end
 local gui = make("ScreenGui", {Name = "BlockSpinPrototype", ResetOnSpawn = false,
     ZIndexBehavior = Enum.ZIndexBehavior.Sibling}, playerGui)
 local window = make("Frame", {Size = UDim2.new(0.9, 0, 0.85, 0),
     Position = UDim2.fromScale(0.5, 0.5), AnchorPoint = Vector2.new(0.5, 0.5),
-    BackgroundColor3 = Color3.fromRGB(5, 5, 5), BorderSizePixel = 0}, gui)
+    BackgroundColor3 = theme.background, BorderSizePixel = 0, ClipsDescendants = true}, gui)
 local viewport = make("Frame", {Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1,
     Active = false, Visible = false}, gui)
 -- Attendre le premier calcul de disposition avant de restaurer la geometrie.
@@ -131,75 +147,157 @@ while viewport.AbsoluteSize.X <= 0 or viewport.AbsoluteSize.Y <= 0 do
     RunService.RenderStepped:Wait()
 end
 local menuScale = make("UIScale", {Scale = preferences.scale}, window)
+local layoutMenu
 local function fitWindow()
     local v = viewport.AbsoluteSize
-    local w = math.clamp(window.Size.X.Offset, math.min(360, v.X / preferences.scale), math.max(1, v.X / preferences.scale))
-    local h = math.clamp(window.Size.Y.Offset, math.min(340, v.Y / preferences.scale), math.max(1, v.Y / preferences.scale))
+    local w = math.clamp(window.Size.X.Offset, math.min(480, v.X / preferences.scale), math.max(1, v.X / preferences.scale))
+    local h = math.clamp(window.Size.Y.Offset, math.min(400, v.Y / preferences.scale), math.max(1, v.Y / preferences.scale))
     window.Size = UDim2.fromOffset(w, h)
     window.Position = UDim2.fromOffset(math.clamp(window.Position.X.Offset, 0, math.max(0, v.X - w * preferences.scale)),
         math.clamp(window.Position.Y.Offset, 0, math.max(0, v.Y - h * preferences.scale)))
+    if layoutMenu then layoutMenu() end
 end
-local initialSize = preferences.size or {x = math.min(700, viewport.AbsoluteSize.X * 0.9),
-    y = math.min(580, viewport.AbsoluteSize.Y * 0.85)}
+local initialSize = preferences.size or {x = math.min(840, viewport.AbsoluteSize.X * 0.92),
+    y = math.min(680, viewport.AbsoluteSize.Y * 0.88)}
 local initialPosition = preferences.position or {x = (viewport.AbsoluteSize.X - initialSize.x * preferences.scale) / 2,
     y = (viewport.AbsoluteSize.Y - initialSize.y * preferences.scale) / 2}
 window.AnchorPoint = Vector2.new(0, 0)
 window.Size = UDim2.fromOffset(initialSize.x, initialSize.y)
 window.Position = UDim2.fromOffset(initialPosition.x, initialPosition.y)
 fitWindow()
-make("UICorner", {CornerRadius = UDim.new(0, 10)}, window)
+round(window, 12)
+outline(window)
 local function label(parent, text, height)
     return make("TextLabel", {Size = UDim2.new(1, 0, 0, height or 36),
         BackgroundTransparency = 1, Text = text, TextWrapped = true,
-        TextColor3 = Color3.fromRGB(235, 235, 235), TextSize = 15,
+        TextColor3 = theme.muted, TextSize = 13,
         Font = Enum.Font.Gotham, TextXAlignment = Enum.TextXAlignment.Left}, parent)
 end
 local function button(parent, text, callback)
-    local item = make("TextButton", {Size = UDim2.new(1, 0, 0, 34),
-        BackgroundColor3 = Color3.fromRGB(25, 25, 25), BorderSizePixel = 0,
-        Text = text, TextColor3 = Color3.fromRGB(245, 245, 245), TextSize = 14,
-        Font = Enum.Font.Gotham, TextWrapped = true}, parent)
-    make("UICorner", {CornerRadius = UDim.new(0, 6)}, item)
+    local item = make("TextButton", {Size = UDim2.new(1, 0, 0, 40),
+        BackgroundColor3 = theme.control, BorderSizePixel = 0,
+        Text = text, TextColor3 = theme.text, TextSize = 13,
+        Font = Enum.Font.GothamMedium, TextWrapped = true, Selectable = true,
+        AutoButtonColor = true, TextXAlignment = Enum.TextXAlignment.Left}, parent)
+    round(item, 7)
+    outline(item)
+    inset(item, 14)
     connect(item.Activated, callback)
     return item
 end
 local function textbox(parent, placeholder)
-    return make("TextBox", {Size = UDim2.new(1, 0, 0, 34),
-        BackgroundColor3 = Color3.fromRGB(20, 20, 20), BorderSizePixel = 0,
+    local object = make("TextBox", {Size = UDim2.new(1, 0, 0, 40),
+        BackgroundColor3 = theme.background, BorderSizePixel = 0,
         Text = "", PlaceholderText = placeholder, ClearTextOnFocus = false,
-        TextColor3 = Color3.fromRGB(245, 245, 245), TextSize = 14,
-        Font = Enum.Font.Gotham}, parent)
+        PlaceholderColor3 = theme.muted, TextXAlignment = Enum.TextXAlignment.Left,
+        TextColor3 = theme.text, TextSize = 13, Font = Enum.Font.Gotham}, parent)
+    round(object, 7)
+    outline(object)
+    inset(object, 14)
+    return object
 end
-local title = label(window, "  BLOCKSPIN | v" .. VERSION .. " | glisser ici", 42)
+local top = make("Frame", {Size = UDim2.new(1, 0, 0, 76), BackgroundColor3 = theme.surface,
+    BorderSizePixel = 0}, window)
+make("Frame", {Size = UDim2.new(1, 0, 0, 1), Position = UDim2.fromOffset(0, 75),
+    BackgroundColor3 = theme.border, BorderSizePixel = 0}, top)
+local title = label(window, "BLOCKSPIN", 44)
+title.Position = UDim2.fromOffset(24, 8)
+title.Size = UDim2.new(1, -280, 0, 36)
+title.TextSize = 21
+title.Font = Enum.Font.GothamBold
+title.TextColor3 = theme.text
 title.Active = true
+local version = label(top, "PRIVATE HUB  /  v" .. VERSION, 20)
+version.Position = UDim2.fromOffset(24, 42)
+version.Size = UDim2.new(1, -270, 0, 20)
+version.TextSize = 10
 local metrics = label(window, "  FPS : -- | Ping reseau : N/D", 30)
-metrics.Position = UDim2.fromOffset(0, 42)
-status = label(window, "  Pret. " .. preferences.hotkey .. " : masquer / afficher.", 54)
-status.Position = UDim2.new(0, 0, 1, -54)
+metrics.Size = UDim2.fromOffset(212, 30)
+metrics.Position = UDim2.new(1, -236, 0, 23)
+metrics.TextSize = 12
+metrics.TextColor3 = theme.text
+metrics.BackgroundColor3 = theme.control
+metrics.BackgroundTransparency = 0
+round(metrics, 6)
+outline(metrics)
+local side = make("Frame", {Position = UDim2.fromOffset(0, 76), Size = UDim2.new(0, 172, 1, -112),
+    BackgroundColor3 = theme.surface, BorderSizePixel = 0}, window)
+local navCaption = label(side, "WORKSPACE", 24)
+navCaption.Position = UDim2.fromOffset(20, 16)
+navCaption.Size = UDim2.new(1, -40, 0, 24)
+navCaption.TextSize = 10
 local tabs = make("Frame", {BackgroundTransparency = 1,
-    Position = UDim2.fromOffset(12, 82), Size = UDim2.new(0, 130, 1, -148)}, window)
-make("UIListLayout", {Padding = UDim.new(0, 8)}, tabs)
-local pages = {}
-local tabButtons = {}
+    Position = UDim2.fromOffset(12, 52), Size = UDim2.new(1, -24, 1, -64)}, side)
+make("UIListLayout", {Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder}, tabs)
+local footer = make("Frame", {Size = UDim2.new(1, 0, 0, 36), Position = UDim2.new(0, 0, 1, -36),
+    BackgroundColor3 = theme.background, BorderSizePixel = 0}, window)
+make("Frame", {Size = UDim2.new(1, 0, 0, 1), BackgroundColor3 = theme.border, BorderSizePixel = 0}, footer)
+status = label(window, "Pret. " .. preferences.hotkey .. " : masquer / afficher.", 34)
+status.Position = UDim2.new(0, 20, 1, -35)
+status.Size = UDim2.new(1, -60, 0, 34)
+status.TextSize = 11
+local pages, tabButtons, tabMarks = {}, {}, {}
+local activePage = "Farming"
+local pageInfo = {
+    Fishing = {title = "Fishing", subtitle = "Peche et reperes de session", short = "FSH"},
+    Farming = {title = "Farming", subtitle = "Votre espace de culture", short = "FRM"},
+    ["Fish Index"] = {title = "Fish Index", subtitle = "Votre carnet de captures", short = "IDX"},
+    Settings = {title = "Settings", subtitle = "Composez votre espace", short = "SET"}
+}
+local function updateTabs()
+    for name, item in pairs(tabButtons) do
+        local selected = name == activePage
+        item.BackgroundColor3 = selected and theme.control or theme.surface
+        item.TextColor3 = selected and theme.accent or theme.muted
+        tabMarks[name].Visible = selected
+    end
+end
 local function page(name)
+    local order = #tabs:GetChildren()
     local body = make("ScrollingFrame", {Name = name, BackgroundTransparency = 1,
-        BorderSizePixel = 0, Position = UDim2.fromOffset(154, 82),
-        Size = UDim2.new(1, -168, 1, -148), CanvasSize = UDim2.new(),
-        AutomaticCanvasSize = Enum.AutomaticSize.Y, ScrollBarThickness = 5,
-        Visible = false}, window)
-    make("UIListLayout", {Padding = UDim.new(0, 8)}, body)
-    make("UIPadding", {PaddingRight = UDim.new(0, 8), PaddingBottom = UDim.new(0, 8)}, body)
+        BorderSizePixel = 0, Position = UDim2.fromOffset(196, 96),
+        Size = UDim2.new(1, -220, 1, -148), CanvasSize = UDim2.new(),
+        AutomaticCanvasSize = Enum.AutomaticSize.Y, ScrollBarThickness = 3,
+        ScrollBarImageColor3 = theme.border, Visible = false}, window)
+    make("UIListLayout", {Padding = UDim.new(0, 10), SortOrder = Enum.SortOrder.LayoutOrder}, body)
+    make("UIPadding", {PaddingRight = UDim.new(0, 6), PaddingBottom = UDim.new(0, 12)}, body)
     pages[name] = body
     tabButtons[name] = button(tabs, name, function()
+        activePage = name
         for key, item in pairs(pages) do item.Visible = key == name end
+        updateTabs()
     end)
+    tabButtons[name].LayoutOrder = order
+    tabMarks[name] = make("Frame", {Size = UDim2.fromOffset(3, 18), Position = UDim2.new(0, 4, 0.5, -9),
+        BackgroundColor3 = theme.accent, BorderSizePixel = 0, Visible = false}, tabButtons[name])
+    round(tabMarks[name], 2)
+    local heading = label(body, pageInfo[name].title, 32)
+    heading.Font, heading.TextSize, heading.TextColor3 = Enum.Font.GothamBold, 26, theme.text
+    label(body, pageInfo[name].subtitle, 24)
     return body
 end
+local accentLabels = {}
+local function section(parent, text)
+    local heading = label(parent, text, 28)
+    heading.TextSize, heading.TextColor3, heading.Font = 10, theme.accent, Enum.Font.GothamBold
+    table.insert(accentLabels, heading)
+    return heading
+end
+local function notice(parent, text)
+    local item = label(parent, text, 56)
+    item.BackgroundTransparency, item.BackgroundColor3, item.TextColor3 = 0, theme.surface, theme.muted
+    round(item, 8)
+    outline(item)
+    inset(item, 14)
+    return item
+end
 local fishing = page("Fishing")
-label(fishing, "Appat, captures et Auto Fish : non verifies.", 50)
+notice(fishing, "EN PREPARATION  /  La peche automatique n'est pas encore reliee au jeu.")
+section(fishing, "AUTOMATISATION")
 button(fishing, "Auto Fish / Auto Record : non verifies", function()
     status.Text = unavailable("Peche automatique et enregistrement")
 end)
+section(fishing, "REPERE DE SESSION")
 local spot = label(fishing, "Aucun repere joueur enregistre.", 60)
 button(fishing, "Memoriser ma position joueur (session)", function()
     local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
@@ -209,15 +307,21 @@ button(fishing, "Memoriser ma position joueur (session)", function()
     status.Text = "Repere joueur uniquement. Ce n'est PAS la position de l'appat."
 end)
 local farming = page("Farming")
-label(farming, "Actions non branchees. Graines saisies manuellement.", 50)
+notice(farming, "EN PREPARATION  /  Les actions de culture ne sont pas encore reliees au jeu.")
+section(farming, "ACTIONS DE CULTURE")
 local selected = nil
 local selection = label(farming, "Graine selectionnee : aucune", 36)
-for _, action in ipairs({"Recolte", "Plantation", "Engrais", "Terre"}) do
+local actionGrid = make("Frame", {Name = "CultureActions", BackgroundTransparency = 1,
+    Size = UDim2.new(1, 0, 0, 96)}, farming)
+for i, action in ipairs({"Recolte", "Plantation", "Engrais", "Terre"}) do
     local actionName = action
-    button(farming, actionName .. " : non verifie", function()
+    local tile = button(actionGrid, actionName .. "\nEn preparation", function()
         status.Text = unavailable(actionName)
     end)
+    tile.Size = UDim2.new(0.5, -5, 0, 43)
+    tile.Position = UDim2.new((i - 1) % 2 * 0.5, (i - 1) % 2 * 5, 0, math.floor((i - 1) / 2) * 53)
 end
+section(farming, "VOTRE SELECTION DE GRAINES")
 local names = textbox(farming, "Graines : nom1, nom2 (liste manuelle)")
 local filter = textbox(farming, "Filtrer les noms (texte)")
 local seedList = make("Frame", {BackgroundTransparency = 1,
@@ -241,9 +345,10 @@ local function refreshSeeds()
                 local seed = name
                 -- Connexions gerees a part : la liste est reconstruite pendant la saisie.
                 local item = make("TextButton", {Size = UDim2.new(1, 0, 0, 32),
-                    BackgroundColor3 = Color3.fromRGB(25, 25, 25), Text = seed,
-                    TextColor3 = Color3.fromRGB(245, 245, 245), TextSize = 14,
-                    Font = Enum.Font.Gotham}, seedList)
+                    BackgroundColor3 = theme.control, Text = seed,
+                    TextColor3 = theme.text, TextSize = 13,
+                    Font = Enum.Font.GothamMedium, BorderSizePixel = 0, Selectable = true}, seedList)
+                round(item, 7)
                 table.insert(seedConnections, item.Activated:Connect(function()
                     selected = seed
                     selection.Text = "Graine selectionnee : " .. seed
@@ -259,17 +364,19 @@ end
 connect(names:GetPropertyChangedSignal("Text"), refreshSeeds)
 connect(filter:GetPropertyChangedSignal("Text"), refreshSeeds)
 local index = page("Fish Index")
-label(index, "Catalogue vide : aucune espece BlockSpin verifiee.", 60)
+notice(index, "Votre collection commence ici. Aucune espece BlockSpin verifiee pour le moment.")
 label(index, "Aucune capture detectee. Aucun poisson fictif ajoute.", 60)
 local settings = page("Settings")
-label(settings, "Reglages locaux. Aucun repere sauvegarde.", 50)
+section(settings, "APPARENCE ET AFFICHAGE")
 local accent = textbox(settings, "Accent hexadecimal : #RRGGBB")
 accent.Text = preferences.accent
 local function applyAccent(hex)
     local color = Color3.fromRGB(tonumber(hex:sub(1, 2), 16),
         tonumber(hex:sub(3, 4), 16), tonumber(hex:sub(5, 6), 16))
-    title.TextColor3 = color
-    for _, item in pairs(tabButtons) do item.TextColor3 = color end
+    theme.accent = color
+    for _, item in ipairs(accentLabels) do item.TextColor3 = color end
+    for _, item in pairs(tabMarks) do item.BackgroundColor3 = color end
+    updateTabs()
 end
 applyAccent(preferences.accent)
 button(settings, "Appliquer la couleur d'accent", function()
@@ -290,11 +397,17 @@ metricButton = button(settings, showMetrics and "FPS / ping : affiches" or "FPS 
     metricButton.Text = showMetrics and "FPS / ping : affiches" or "FPS / ping : masques"
     saveSettings()
 end)
+section(settings, "PERFORMANCES ET OVERLAY")
 local overlay = label(gui, "  FPS : -- | Ping : N/D", 36)
 overlay.Name = "PerformanceOverlay"
 overlay.Size = UDim2.fromOffset(270, 36)
 overlay.BackgroundTransparency = 0.15
-overlay.BackgroundColor3 = Color3.fromRGB(5, 5, 5)
+overlay.BackgroundColor3 = theme.background
+overlay.TextColor3 = theme.text
+overlay.TextSize = 12
+overlay.Font = Enum.Font.GothamMedium
+round(overlay, 8)
+outline(overlay)
 overlay.Active = true
 overlay.ZIndex = 10
 overlay.Visible = preferences.overlay
@@ -449,7 +562,7 @@ local function applyPreferences()
     hotkeyButton.Text, modeButton.Text, graphButton.Text = keyText(), modeText(), graphText()
     scaleInput.Text = tostring(math.floor(preferences.scale * 100 + 0.5))
     graphVisibility()
-    local size = preferences.size or {x = 700, y = 580}
+    local size = preferences.size or {x = 840, y = 680}
     window.Size = UDim2.fromOffset(size.x, size.y)
     local position = preferences.position or {x = (viewport.AbsoluteSize.X - size.x * preferences.scale) / 2,
         y = (viewport.AbsoluteSize.Y - size.y * preferences.scale) / 2}
@@ -470,6 +583,7 @@ button(settings, "Recentrer le menu et l'overlay", function()
     rememberGeometry()
     saveSettings()
 end)
+section(settings, "PROFILS DE PRESENTATION")
 local profileInput = textbox(settings, "Nom du profil (32 caracteres maximum)")
 local profileList = label(settings, "", 0)
 profileList.AutomaticSize = Enum.AutomaticSize.Y
@@ -522,6 +636,7 @@ button(settings, "Reinitialiser les reglages (garder les profils)", function()
     rememberGeometry()
     saveSettings()
 end)
+section(settings, "DIAGNOSTIC ET SESSION")
 local diagnosticInfo = label(settings, "", 100)
 diagnostic = label(settings, #errors > 0 and table.concat(errors, "\n") or "Aucune erreur capturee.", 130)
 local function refreshDiagnostic()
@@ -533,7 +648,25 @@ button(settings, "Actualiser le diagnostic", refreshDiagnostic)
 button(settings, "Tester la capture d'erreur", function() error("Test volontaire du diagnostic") end)
 refreshDiagnostic()
 button(settings, "Tout arreter et fermer", function() gui:Destroy() end)
-pages.Fishing.Visible = true
+layoutMenu = function()
+    local compact = window.Size.X.Offset < 620
+    local width = compact and 84 or 172
+    side.Size = UDim2.new(0, width, 1, -112)
+    navCaption.Visible = not compact
+    tabs.Position = UDim2.fromOffset(12, compact and 20 or 52)
+    tabs.Size = UDim2.new(1, -24, 1, compact and -32 or -64)
+    for name, body in pairs(pages) do
+        body.Position = UDim2.fromOffset(width + 24, 96)
+        body.Size = UDim2.new(1, -width - 48, 1, -148)
+        tabButtons[name].Text = compact and pageInfo[name].short or name
+        tabButtons[name].TextSize = compact and 10 or 13
+    end
+    title.Size = UDim2.new(1, compact and -270 or -280, 0, 36)
+    title.TextSize = compact and 17 or 21
+end
+fitWindow()
+updateTabs()
+pages.Farming.Visible = true
 connect(Input.InputBegan, function(input, processed)
     if input.UserInputType ~= Enum.UserInputType.Keyboard or Input:GetFocusedTextBox() then return end
     if capturing then

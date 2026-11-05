@@ -126,7 +126,7 @@ function writefile(path, data) files[path]=data end
 
 lua = runtime()
 lua.execute('''
-assert(find('BLOCKSPIN').Text:find('0.3.0',1,true))
+assert(find('PRIVATE HUB').Text:find('0.4.0',1,true))
 click('Overlay FPS / ping : inactif')
 local overlay=find('FPS : -- | Ping : N/D')
 assert(overlay.Visible)
@@ -248,3 +248,31 @@ lua=runtime(json.dumps(legacy))
 lua.execute("assert(find('Raccourci : F6')); assert(find('Mesures overlay : FPS + ping')); click('Tout arreter')")
 assert json.loads(lua.globals().files['blockspin-settings-v1.json'])['scale']==1
 print('OK : anciens reglages compatibles')
+
+# Redesign: navigation, compact layout and custom accent preserve behavior.
+lua=runtime()
+lua.execute("""
+local pages={}
+for _,o in ipairs(objects) do if o.ClassName=='ScrollingFrame' then pages[o.Name]=o end end
+assert(pages.Farming.Visible and not pages.Fishing.Visible)
+click('Fishing');assert(pages.Fishing.Visible and not pages.Farming.Visible)
+click('Farming');assert(pages.Farming.Visible and not pages.Fishing.Visible)
+local actions=0
+for _,o in ipairs(objects) do
+ if o.ClassName=='TextButton' and o.Parent.Name=='CultureActions' then
+  actions=actions+1;o.Activated:Fire();assert(find('Aucune action envoyee.'))
+ end
+end
+assert(actions==4)
+for _,o in ipairs(objects) do if o.PlaceholderText=='Accent hexadecimal : #RRGGBB' then o.Text='#12ABEF' end end
+click("Appliquer la couleur d'accent")
+local heading=find('ACTIONS DE CULTURE')
+assert(heading.TextColor3[1]==18 and heading.TextColor3[2]==171 and heading.TextColor3[3]==239)
+local handle=find('<>');local start=pointer('MouseButton1',100,100);handle.InputBegan:Fire(start)
+input.InputChanged:Fire(pointer('MouseMovement',-5000,-5000));input.InputEnded:Fire(start)
+assert(pages.Farming.Position.X.Offset==108)
+click('FSH');assert(pages.Fishing.Visible)
+click('FRM');assert(pages.Farming.Visible)
+click('Tout arreter');assert(connectionsActive()==0)
+""")
+print('OK : grille de culture, navigation, accent et disposition compacte')

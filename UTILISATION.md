@@ -1,4 +1,4 @@
-# BlockSpin Hub 0.3.0
+# BlockSpin Hub 0.4.0
 
 Prototype client Lua/Luau. Compatibilité Windows/Xeno non certifiée. Les contrôles automatisés utilisent une simulation ; aucun test réel Roblox/Xeno n'a été effectué.
 
@@ -6,10 +6,16 @@ Prototype client Lua/Luau. Compatibilité Windows/Xeno non certifiée. Les contr
 
 Copier le contenu de `loader.lua` dans l'exécuteur, ou copier directement `src/main.lua`. Le lanceur télécharge le code du dépôt public `mmr45/blockspin-private-hub`. Aucun jeton ni clé requis. Le code est visible et utilisable par tous.
 
+## Interface 0.4.0
+
+Interface charbon avec accent personnalisable (vert citron par défaut pour les nouveaux réglages), titres hiérarchisés, champs et boutons bordés. Farming s'ouvre par défaut ; les quatre actions de culture sont disposées en grille. Les états « En préparation » indiquent les actions non branchées au jeu.
+
+Navigation latérale avec indicateur actif. Sous 620 pixels de largeur logique, les onglets deviennent FSH, FRM, IDX et SET. Les positions, profils et couleurs déjà enregistrés sont conservés. La géométrie est ajustée à la nouvelle taille minimale quand l'écran le permet.
+
 ## Menu et overlay
 
 - Glisser la barre du titre pour déplacer le menu.
-- Glisser la poignée `<>` en bas à droite pour redimensionner le menu. Dimensions limitées à l'écran ; minimum 360 × 340 si l'écran le permet.
+- Glisser la poignée `<>` en bas à droite pour redimensionner le menu. Dimensions limitées à l'écran ; minimum 480 × 400 si l'écran le permet.
 - Dans Settings, activer « Overlay FPS / ping ». Il reste visible quand le menu est masqué ; glisser l'overlay pour le déplacer.
 - Les FPS et le ping API sont actualisés environ chaque seconde. Si le ping n'est pas disponible, la valeur affiche `N/D`.
 - Le raccourci initial est `RightShift` (Maj droite). Dans Settings, cliquer « Raccourci », puis appuyer sur une touche clavier. Échap annule. La saisie dans un champ texte ne masque pas le menu.

@@ -18,5 +18,5 @@ assert 'local configPath = "blockspin-settings-v1.json"' in source
 assert 'pcall(callback, ...)' in source
 assert 'Input:GetFocusedTextBox()' in source
 assert 'if showMetrics or preferences.overlay or preferences.graph then' in source
-assert 'local VERSION = "0.3.0"' in source
+assert 'local VERSION = "0.4.0"' in source
 print('OK : 4 onglets, integrations fermees, filtre litteral, mesures protegees, nettoyage, loader bloque.')

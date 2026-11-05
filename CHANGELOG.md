@@ -1,5 +1,13 @@
 # Historique
 
+## 0.4.0 — 2026-11-05
+
+- Refonte de l'interface : fond charbon, accent personnalisable, barre de navigation et indicateur actif.
+- Farming ouvert par défaut, actions en grille et champs de graines alignés.
+- Titres de page et sections distinctes, contrôles bordés, overlay assorti.
+- Navigation compacte sur les petites fenêtres ; taille minimale 480 × 400 si l'écran le permet.
+- Réglages et profils précédents conservés ; aucune nouvelle automatisation de jeu.
+
 ## 0.3.0 — 2026-11-05
 
 - Échelle du menu réglable de 75 à 150 %.

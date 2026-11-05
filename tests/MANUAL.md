@@ -34,3 +34,10 @@ Aucun cas ci-dessous n'a été exécuté dans Roblox ou Xeno.
 24. Enregistrer deux profils différents ; modifier les réglages, charger chacun puis relancer. Vérifier l'indépendance des profils, le remplacement d'un nom et la suppression. Refuser noms vides, noms trop longs et onzième profil.
 25. Recentrer après déplacement : menu centré, overlay centré en haut. Réinitialiser après changement de touche : retour à Maj droite, échelle 100 %, graphiques/overlay désactivés et profils conservés.
 26. Charger un ancien fichier 0.2.0 valide : conserver les préférences existantes et appliquer les valeurs par défaut des nouveaux champs.
+
+## Version 0.4.0 — interface, non exécutée dans Roblox/Xeno
+
+27. Vérifier Farming ouvert par défaut, les quatre actions en grille et leur message « Aucune action envoyée » au clic.
+28. Changer d'onglet : un seul visible, indicateur actif et couleur correspondants. Sous 620 pixels logiques, vérifier FSH/FRM/IDX/SET et l'absence de chevauchement du titre et des mesures.
+29. Parcourir Settings au clavier et par défilement. Tester échelles 75/100/150 %, fenêtres étroites, sauvegarde et restauration de profils.
+30. Modifier l'accent : sections, onglet actif et marqueur actualisés. Vérifier lisibilité des textes et champs, overlay indépendant et nettoyage à la fermeture.
