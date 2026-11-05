@@ -244,7 +244,12 @@ function VIM:SendMouseButtonEvent(x, y, b, down)
     else
         if M.sliderGrab and x >= M.slider.AbsolutePosition.X + M.slider.AbsoluteSize.X - 3 then M.sliderMax = true end
         M.sliderGrab = false
-        if M.sellHoldStart and M.clock - M.sellHoldStart >= 3 then M.capLabel.Text = '3/18'; M.sellBtn.Visible = false end
+        if M.sellHoldStart and M.clock - M.sellHoldStart >= 3 then
+            M.capLabel.Text = '3/18'; M.sellBtn.Visible = false
+            if M.saleRevenue then
+                M.cash = M.cash + M.saleRevenue; M.cashLabel.Text = 'Cash: $' .. M.cash
+            end
+        end
         M.sellHoldStart = nil
     end
 end

@@ -303,4 +303,3 @@ check('perf : appats suivis via le cache, sans parcours', S.baitCount == 15 and 
 M.baitLabel.Text = 'x0'
 M.run(2)
 check('appats x0 : arret + annonce', S.baitEmpty and toasts(M)[#toasts(M)]:find('appats', 1, true) ~= nil)
-

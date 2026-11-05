@@ -1448,6 +1448,11 @@ function S.loadLibrary()
     if not ok then S.hub:error('Bibliotheque', err, os.clock()) end
     return ok, ok and 'Bibliotheque chargee' or tostring(err)
 end
+function S.spotEvent(kind)
+    local spot = S.hub.activeSpot and S.hub.library.spots[S.hub.activeSpot]
+    local root = getRoot()
+    if spot and root and (root.Position - v3(spot.cf)).Magnitude <= 8 then S.hub:spotEvent(kind) end
+end
 function S.saveSpot(name)
     if not idle() then return false, 'activite en cours' end
     local root = getRoot()
@@ -2357,12 +2362,12 @@ function S.scanCatch(now)
             local f = fold(t)
             -- index : textes courts avec des lettres (probablement le nom du poisson)
             if #t >= 3 and #t <= 40 and f:find('%a%a') and not f:find('^[%s%d%p]*$') then
-                S.fishLog[t] = (S.fishLog[t] or 0) + 1; changed = true; S.hub:spotEvent('texts')
+                S.fishLog[t] = (S.fishLog[t] or 0) + 1; changed = true; S.spotEvent('texts')
             end
             local rare = false
             for _, w in ipairs(RARE_WORDS) do if f:find(w, 1, true) then rare = true end end
             if not rare and ui.rarePurple and isPurple(o.TextColor3) then rare = true end
-            if rare then S.hub:spotEvent('rareSignals') end
+            if rare then S.spotEvent('rareSignals') end
             if rare and ui.rareAction ~= 'none' and os.clock() > rareCooldownUntil and S.running then rareTrigger(t) end
         end
     end
@@ -2454,7 +2459,7 @@ local function tryCast(now)
     aimAtSavedPoint()
     lastCast = now
     S.castAttempts = S.castAttempts + 1
-    S.hub:spotEvent('casts')
+    S.spotEvent('casts')
     local ok, err = pcall(function() tool:Activate() end)
     if ok then update('lancer ' .. S.castAttempts .. ' (' .. tool.Name .. ')')
     else update('erreur lancer : ' .. tostring(err):sub(1, 70)) end
@@ -2664,4 +2669,3 @@ if currentSeat() then rememberCar() end
 setState(S.fishingEnabled and 'FISHING' or 'IDLE', 'pret')
 logLine('Charge. Stop : getgenv().BlockSpinCycle080.stop()')
 refreshInfo()
-

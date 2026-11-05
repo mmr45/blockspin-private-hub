@@ -49,4 +49,3 @@ if args.check:
 else:
     target.write_text(out, encoding="utf-8", newline="\n")
     print("ecrit src/main.lua", len(out.splitlines()), "lignes")
-

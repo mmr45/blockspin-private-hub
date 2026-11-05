@@ -29,4 +29,3 @@ assert "blockspin-settings-v1.json" in source
 loader = (root / "loader.lua").read_text(encoding="utf-8")
 assert "raw.githubusercontent.com/mmr45/blockspin-private-hub/main/src/main.lua" in loader
 print("OK : main.lua regenere, 6 onglets, pas de remote/teleportation, F3-F11 retirees, loader vers src/main.lua.")
-
