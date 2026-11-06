@@ -1,3 +1,31 @@
+# Correctifs 1.1.1 — Money et entrées de pêche
+
+Les captures utilisateur ont montré les limites de la 1.1.0. Cette correction est testée en simulation ; elle reste à essayer dans Roblox/Xeno.
+
+## Money
+
+La lecture est maintenant automatique (cache contrôlé environ toutes les 0,8 s, signaux de modification, nouvelle recherche au plus toutes les 10 s si la source manque). Les libellés explicites de portefeuille et les données numériques publiques de portefeuille réellement présentes dans Player/leaderstats/attributs peuvent être suivis. Aucun remote ni montant n’est inventé.
+
+Si le solde reste N/D : ouvrir l’interface du jeu qui affiche le montant, puis **Rechercher / choisir le compteur** et choisir uniquement le portefeuille. Le compteur choisi est sauvegardé sur cette action explicite. **Revenir à la lecture automatique** supprime ce choix. Une source masquée/absente reste signalée ; N/D ne veut pas dire zéro.
+
+Les cartes **Hausses observées** indiquent les variations positives du compteur. Ce ne sont pas nécessairement des revenus de vente. Les revenus de ventes et les dépôts confirmés du cycle restent séparés ; les baisses observées incluent aussi les dépôts. Une nouvelle source ne crée pas de gain artificiel. L’extrapolation horaire commence après 60 secondes de lecture d’un compteur fiable.
+
+## Spots : procédure corrigée
+
+1. Se placer au point de pêche et cliquer **Enregistrer ce spot**. Un nom vide devient « Spot 1 », « Spot 2 », etc.
+2. Cliquer **Capturer la visée dans 3 secondes**, placer le curseur sur l’eau dans Roblox et attendre. La capture est liée directement au spot actif ; il n’est plus nécessaire de recréer le spot après capture.
+3. Cliquer **Sauvegarder la bibliothèque** pour conserver ce changement sur disque.
+
+La capture conserve un point monde lorsque `Mouse.Hit` est disponible, avec une visée écran de repli. Au lancer, le point monde est reprojeté par la caméra, le mouvement natif est envoyé, puis le script attend son traitement et vérifie le résultat. Si le point est hors champ, masqué ou si l’entrée est refusée, le lancer est suspendu avec un message. Les anciennes visées uniquement écran restent compatibles, mais doivent être recapturées après un changement de résolution/caméra. Aucun CFrame n’est écrit.
+
+## Curseur et focus
+
+Le clic du mini-jeu vise la cible GUI détectée. Il peut donc être envoyé à la barre quand le curseur était ailleurs, **si Roblox garde le focus et accepte l’entrée native**. Le menu se masque immédiatement pour ne pas intercepter le clic. Le compteur de clics mesure des entrées acceptées, pas des captures de poissons prouvées.
+
+Si une autre application prend le focus, la pêche est mise en pause. Le script ne force pas le focus et ne promet pas une exécution en arrière-plan. Le repli historique mouse1click n’est utilisé que si le curseur était déjà sur la barre avec focus observé ; aucun clic OS n’est envoyé à une position inconnue. La saisie d’un texte ou un glisser de réglage suspend aussi les entrées.
+
+---
+
 # Interface 1.1.0 — nouveautés
 
 Cette version ajoute la catégorie **Server** et un tableau visuel. Les anciennes explications de la 1.0 ci-dessous restent utiles pour les activités et les fichiers.

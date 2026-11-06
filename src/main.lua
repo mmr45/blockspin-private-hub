@@ -1,10 +1,10 @@
--- BlockSpin Hub v1.1.0
+-- BlockSpin Hub v1.1.1
 -- Peche auto (logique v0.6.8 conservee) + cycle vente/ATM par conduite NATIVE sur route
 -- (touches simulees W/A/S/D, aucun deplacement de CFrame, aucune teleportation).
 -- Aucun passage sous la carte : non implemente volontairement (voir README_v080.md).
 -- Arret complet : getgenv().BlockSpinCycle080.stop()
 -- Arret d'urgence du cycle/conduite (le script reste charge) : F12
-local VERSION = '1.1.0'
+local VERSION = '1.1.1'
 local E = (getgenv and getgenv()) or _G
 
 ---------------------------------------------------------------------------
@@ -96,9 +96,12 @@ function Core:snapshot(now)
         hourly = elapsed >= 60 and self.money.earned * 3600 / elapsed or nil,
         activity = self.current and self.current.name or 'repos' }
 end
-function Core:observeCash(n)
+function Core:observeCash(n,source,now)
     if not finite(n) or n < 0 then return false end
     local m = self.money
+    if source and m.cashSource and source~=m.cashSource then m.cash=nil end
+    if source then m.cashSource=source end
+    if finite(now) and m.observedStartedAt==nil then m.observedStartedAt=now end
     if m.cash ~= nil then
         m.observedIncreases = m.observedIncreases + math.max(0, n - m.cash)
         m.observedDecreases = m.observedDecreases + math.max(0, m.cash - n)
@@ -127,11 +130,46 @@ function Core:transaction(id, kind, before, after, proof)
     else m.deposited = m.deposited + amount; m.deposits = m.deposits + 1 end
     self:observeCash(after); return true
 end
+function Core.normalizeName(name)
+    if type(name)~='string' then return '' end
+    return (name:gsub('^%s+',''):gsub('%s+$',''))
+end
+function Core.validAim(aim)
+    if type(aim)~='table' or not finite(aim.x) or not finite(aim.y) then return false end
+    if aim.world~=nil then
+        if type(aim.world)~='table' or #aim.world~=3 then return false end
+        for _,n in ipairs(aim.world) do if not finite(n) then return false end end
+    end
+    if aim.viewport~=nil then
+        if type(aim.viewport)~='table' or not finite(aim.viewport.x) or not finite(aim.viewport.y) or aim.viewport.x<=0 or aim.viewport.y<=0 then return false end
+    end
+    return true
+end
+function Core:updateSpotAim(name,aim)
+    if not self.library.spots[name] then return false,'spot introuvable' end
+    if not Core.validAim(aim) then return false,'visee invalide' end
+    self.library.spots[name].aim=copy(aim);return true
+end
+function Core.cashText(raw,allowBare)
+    if type(raw)~='string' or #raw>512 then return nil end
+    raw=raw:gsub('<[^>]*>',''):gsub(' ',' '):gsub(' ',' '):gsub(' ',' ')
+    local normalized=fold(raw)
+    local labels={'equilibre des mains','argent en main','argent en poche','cash','wallet','portefeuille','solde en main','hand balance','cash in hand','money in hand'}
+    for _,label in ipairs(labels) do
+        local value=normalized:match('^%s*'..label..'%s*:%s*%$?%s*([%d, %.]+)%s*$')
+        if value then return Core.parseMoney(value),'label' end
+    end
+    if allowBare then
+        local value=raw:match('^%s*%$%s*([%d, %.]+)%s*$') or raw:match('^%s*([%d, %.]+)%s*%$%s*$')
+            or raw:match('^%s*€%s*([%d, %.]+)%s*$') or raw:match('^%s*([%d, %.]+)%s*€%s*$')
+        if value then return Core.parseMoney(value),'currency' end
+    end
+end
 function Core:addSpot(name, cf, aim)
     if not nameOK(name) then return false, 'nom du spot invalide' end
     if type(cf) ~= 'table' or #cf ~= 12 then return false, 'position de 12 nombres requise' end
     for _, n in ipairs(cf) do if not finite(n) then return false, 'position invalide' end end
-    if aim ~= nil and (type(aim) ~= 'table' or not finite(aim.x) or not finite(aim.y)) then return false, 'visee invalide' end
+    if aim ~= nil and not Core.validAim(aim) then return false, 'visee invalide' end
     if self.library.spots[name] then return false, 'spot existant : supprimer explicitement avant de remplacer' end
     local count = 0; for _ in pairs(self.library.spots) do count = count + 1 end
     if count >= 50 then return false, 'maximum 50 spots' end
@@ -674,10 +712,12 @@ local function applyCmd(cmd)
     for code, down in pairs(want) do if down then sendKey(code, true) end end
 end
 local mouseHeld = false
+local mouseHeldVia
 local function releaseMouse()
     if not mouseHeld then return end
     mouseHeld = false
-    if type(mouse1release) == 'function' then pcall(mouse1release) end
+    if mouseHeldVia~='native' and type(mouse1release) == 'function' then pcall(mouse1release) end
+    mouseHeldVia=nil
     pcall(function()
         local m = UIS:GetMouseLocation()
         VIM:SendMouseButtonEvent(m.X, m.Y, 0, false, game, 0)
@@ -1105,17 +1145,126 @@ function S.setBaitCount(n)
     S.baitCount = math.floor(n); S.baitEmpty = (S.baitCount == 0); S.baitUnknown = false
     return true
 end
-local function findMoney()
-    for _, obj in ipairs(pg:GetDescendants()) do
+-- Lecture du portefeuille : cache surveille, scans bornes et choix explicite en cas d'ambiguite.
+local findMoney
+do
+local cached,nextScan,connection=nil,0,nil
+S.moneyReading={available=false,value=nil,status='Recherche du compteur',updatedAt=nil}
+S.moneyCandidates={}
+local function disconnect()
+    if connection then connection:Disconnect();connection=nil end
+end
+S.detachMoneySource=disconnect
+local function amount(obj,explicit,attribute)
+    if attribute then
+        if obj~=player then return nil end
+        local n=player:GetAttribute(attribute)
+        return isNum(n) and n>=0 and n or nil
+    end
+    if obj and (obj:IsA('IntValue') or obj:IsA('NumberValue')) then
+        local tag=fold(obj.Name)
+        if not obj.Parent or not obj:IsDescendantOf(player) or (not explicit and tag~='cash' and tag~='wallet' and tag~='money' and tag~='argent') then return nil end
+        return isNum(obj.Value) and obj.Value>=0 and obj.Value or nil
+    end
+    if not obj or not obj.Parent or not obj:IsDescendantOf(pg) or ours(obj) or not shown(obj) then return nil end
+    return Hub.cashText(tostring(obj.Text),explicit)
+end
+local function use(obj,explicit,attribute)
+    if cached and cached.obj==obj and cached.explicit==explicit and cached.attribute==attribute then return end
+    disconnect();cached={obj=obj,explicit=explicit,attribute=attribute}
+    local signal=attribute and obj:GetAttributeChangedSignal(attribute) or obj:GetPropertyChangedSignal((obj:IsA('IntValue') or obj:IsA('NumberValue')) and 'Value' or 'Text')
+    connection=signal:Connect(function()
+        if not S.running then return end
+        local ok,err=pcall(function() S.pollMoney(false);if S.refreshDashboard then S.refreshDashboard() end end)
+        if not ok then S.hub:error('Portefeuille',err,os.clock()) end
+    end)
+end
+findMoney=function(force)
+    if cached and not force then
+        local n=amount(cached.obj,cached.explicit,cached.attribute)
+        if n~=nil then return n,cached.obj:GetFullName()..(cached.attribute and ('[@'..cached.attribute..']') or '') end
+        S.moneyReading.status='Compteur masque ou indisponible'
+        if not cached.obj.Parent or not cached.obj:IsDescendantOf(pg) then disconnect();cached=nil;nextScan=0 end
+    end
+    if not force and os.clock()<nextScan then return nil end
+    nextScan=os.clock()+10
+    local candidates,strong={},{}
+    for _,obj in ipairs(pg:GetDescendants()) do
         if (obj:IsA('TextLabel') or obj:IsA('TextButton')) and not ours(obj) and shown(obj) then
-            local txt = fold(obj.Text)
-            local val = txt:match('equilibre des mains%s*:%s*%$?([%d, %.]+)') or txt:match('cash%s*:%s*%$?([%d, %.]+)')
-            if val then
-                local amount = Hub.parseMoney(val)
-                if amount then return amount, obj:GetFullName() end
+            local n,kind=Hub.cashText(tostring(obj.Text),true)
+            if n~=nil then
+                local entry={obj=obj,value=n,path=obj:GetFullName(),text=tostring(obj.Text),trusted=kind=='label'}
+                candidates[#candidates+1]=entry
+                if entry.trusted then strong[#strong+1]=entry end
             end
         end
     end
+    -- Donnees numeriques publiques si le jeu les replique : aucune API distante supposee.
+    local numeric={}
+    for _,obj in ipairs(player:GetChildren()) do numeric[#numeric+1]=obj end
+    local stats=player:FindFirstChild('leaderstats')
+    if stats then for _,obj in ipairs(stats:GetDescendants()) do numeric[#numeric+1]=obj end end
+    for _,obj in ipairs(numeric) do
+        if obj:IsA('IntValue') or obj:IsA('NumberValue') then
+            local tag=fold(obj.Name)
+            if tag=='cash' or tag=='money' or tag=='wallet' or tag=='argent' or tag=='bank' or tag=='balance' then
+                local n=amount(obj,true)
+                if n~=nil then
+                    local entry={obj=obj,value=n,path=obj:GetFullName(),text=obj.Name..' : '..tostring(n),trusted=tag=='cash' or tag=='money' or tag=='wallet' or tag=='argent'}
+                    candidates[#candidates+1]=entry;if entry.trusted then strong[#strong+1]=entry end
+                end
+            end
+        end
+    end
+    for key,n in pairs(player:GetAttributes()) do
+        local tag=fold(key)
+        if isNum(n) and n>=0 and (tag=='cash' or tag=='money' or tag=='wallet' or tag=='argent' or tag=='bank' or tag=='balance') then
+            local entry={obj=player,attribute=key,value=n,path=player:GetFullName()..'[@'..key..']',text=key..' : '..tostring(n),trusted=tag=='cash' or tag=='money' or tag=='wallet' or tag=='argent'}
+            candidates[#candidates+1]=entry;if entry.trusted then strong[#strong+1]=entry end
+        end
+    end
+    table.sort(candidates,function(a,b) return a.path<b.path end)
+    S.moneyCandidates=candidates
+    if S.moneySourcePath then
+        for _,c in ipairs(candidates) do if c.path==S.moneySourcePath then use(c.obj,true,c.attribute);return c.value,c.path end end
+        S.moneyReading.status='Compteur choisi non visible';return nil
+    end
+    local chosen=strong[1]
+    if chosen then
+        for _,entry in ipairs(strong) do if entry.value~=chosen.value then chosen=nil;break end end
+    end
+    if chosen then use(chosen.obj,false,chosen.attribute);return chosen.value,chosen.path end
+    S.moneyReading.status=#candidates>0 and 'Choisir le compteur du portefeuille' or 'Aucun compteur visible trouve'
+    return nil
+end
+function S.pollMoney(force)
+    local value,path=findMoney(force)
+    local reading=S.moneyReading
+    reading.available=value~=nil;reading.value=value
+    if value~=nil then
+        S.hub:observeCash(value,path,os.clock())
+        reading.source=path;reading.updatedAt=os.clock();reading.status='Actualisation automatique active'
+        return true,'Portefeuille observe : '..tostring(value)
+    end
+    return false,reading.status
+end
+function S.chooseMoneySource(path)
+    for _,c in ipairs(S.moneyCandidates) do
+        if c.path==path and amount(c.obj,true,c.attribute)~=nil then
+            S.moneySourcePath=path;use(c.obj,true,c.attribute);return S.pollMoney(false)
+        end
+    end
+    return false,'Ce compteur a disparu : relancer la recherche'
+end
+function S.searchMoneySources() return S.pollMoney(true) end
+function S.configureMoneySource(path)
+    disconnect();cached=nil;S.moneySourcePath=path;nextScan=0
+    S.moneyReading.available=false;S.moneyReading.value=nil;S.moneyReading.status='Recherche du compteur'
+end
+function S.resetMoneySource()
+    S.configureMoneySource(nil)
+    return S.pollMoney(true)
+end
 end
 
 ---------------------------------------------------------------------------
@@ -1274,6 +1423,7 @@ end
 ---------------------------------------------------------------------------
 local function cancelAll(reason)
     S.token = S.token + 1
+    S.castTicket=nil;S.castPending=false
     releaseAll(); releaseMouse()
     local h = humanoid(); local r = getRoot()
     if h and r and not h.SeatPart then pcall(function() h:MoveTo(r.Position) end) end
@@ -1507,21 +1657,48 @@ function S.spotEvent(kind)
 end
 function S.saveSpot(name)
     if not idle() then return false, 'activite en cours' end
-    local root = getRoot()
-    if not root then return false, 'personnage indisponible' end
-    local aim = S.baitScreenPoint
-    return S.hub:addSpot(name, { root.CFrame:GetComponents() }, aim and { x = aim.X, y = aim.Y })
+    local root=getRoot();if not root then return false,'personnage indisponible' end
+    name=Hub.normalizeName(name)
+    if name=='' then
+        local i=1;repeat name='Spot '..i;i=i+1 until not S.hub.library.spots[name]
+    end
+    local aim=S.fishingAim
+    if not aim and S.baitScreenPoint then aim={x=S.baitScreenPoint.X,y=S.baitScreenPoint.Y} end
+    local ok,why=S.hub:addSpot(name,{root.CFrame:GetComponents()},aim)
+    if not ok then return false,why end
+    S.data.fish=Hub.copy(S.hub.library.spots[name].cf)
+    return true,'Spot '..name..' enregistre'..(aim and '' or ' : capturer la visee sur l’eau'),name
 end
 function S.selectSpot(name)
-    if not idle() then return false, 'activite en cours' end
-    local spot = S.hub.library.spots[name]
-    if not spot then return false, 'spot introuvable' end
-    local root = getRoot()
-    if not root or (root.Position - v3(spot.cf)).Magnitude > 8 then return false, 'rejoindre le spot a moins de 8 studs avant de le selectionner' end
-    S.data.fish = Hub.copy(spot.cf)
-    S.baitScreenPoint = spot.aim and Vector2.new(spot.aim.x, spot.aim.y) or nil
-    S.hub.activeSpot = name
-    return true, 'Spot selectionne : ' .. name
+    if not idle() then return false,'activite en cours' end
+    name=Hub.normalizeName(name)
+    if name=='' then
+        name=S.hub.activeSpot
+        if not name then
+            for key in pairs(S.hub.library.spots) do if name then return false,'Choisis un spot dans la liste' end;name=key end
+        end
+    end
+    local spot=name and S.hub.library.spots[name]
+    if not spot then return false,'Enregistre un spot ou choisis son nom dans la liste' end
+    local root=getRoot()
+    if not root or (root.Position-v3(spot.cf)).Magnitude>8 then return false,'Rejoins ce spot a moins de 8 studs' end
+    S.data.fish=Hub.copy(spot.cf);S.fishingAim=Hub.copy(spot.aim)
+    S.baitScreenPoint=spot.aim and Vector2.new(spot.aim.x,spot.aim.y) or nil
+    S.hub.activeSpot=name
+    return true,'Spot '..name..' selectionne'..(spot.aim and '' or ' : capturer la visee'),name
+end
+function S.captureAimNow(expectedSpot)
+    if S.isFishingInputActive and not S.isFishingInputActive() then return false,'Reviens dans Roblox pour capturer la visee' end
+    local camera=workspace.CurrentCamera;local size=camera and camera.ViewportSize
+    local point=UIS:GetMouseLocation()
+    if not size or not point or not isNum(point.X) or not isNum(point.Y) or point.X<0 or point.Y<0 or point.X>=size.X or point.Y>=size.Y then return false,'Place le curseur sur l’eau dans Roblox' end
+    local aim={x=point.X,y=point.Y,viewport={x=size.X,y=size.Y}}
+    local ok,world=pcall(function() return player:GetMouse().Hit.Position end)
+    if ok and world and isNum(world.X) and isNum(world.Y) and isNum(world.Z) then aim.world={world.X,world.Y,world.Z} end
+    if expectedSpot and S.hub.activeSpot~=expectedSpot then return false,'Le spot a change : relancer la capture' end
+    S.fishingAim=aim;S.baitScreenPoint=Vector2.new(point.X,point.Y);S.aimRetryAt=0
+    if S.hub.activeSpot and S.hub.library.spots[S.hub.activeSpot] then S.hub:updateSpotAim(S.hub.activeSpot,aim) end
+    return true,aim.world and 'Visee dans le monde capturee pour le spot actif' or 'Visee ecran capturee (camera a conserver)'
 end
 function S.saveNamedRoute(name)
     if not idle() then return false, 'terminer l\'enregistrement et les activites avant de conserver le trajet' end
@@ -1544,11 +1721,7 @@ function S.removeLibraryItem(kind, name)
     end
     return true, 'Suppression en memoire ; sauvegarder explicitement pour conserver'
 end
-function S.refreshMoney()
-    local value, path = findMoney()
-    if not S.hub:observeCash(value) then return false, 'solde inconnu : aucune estimation inventee' end
-    return true, 'Solde observe : ' .. value .. ' (' .. tostring(path) .. ')'
-end
+function S.refreshMoney() return S.pollMoney(true) end
 function S.setFarmingAdapter(adapter)
     if not idle() then return false, 'activite en cours' end
     return S.hub:setFarmAdapter(adapter)
@@ -1675,7 +1848,7 @@ local SETTINGS_FILE = 'blockspin-settings-v1.json'
 local ui = { accent = 'FF475C', hotkey = 'RightShift', scale = 1, metrics = true, overlay = false, hideInMinigame = true,
     speedPreset = 'Rapide', rareAction = 'none', rarePurple = true, toasts = true, animations = true, layoutVersion = 2, density = 'normal' }
 local PREF_KEYS = { 'accent', 'hotkey', 'scale', 'metrics', 'overlay', 'hideInMinigame', 'speedPreset', 'rareAction', 'rarePurple', 'toasts', 'animations',
-    'position', 'size', 'overlayPosition', 'layoutVersion', 'density' }
+    'position', 'size', 'overlayPosition', 'layoutVersion', 'density', 'moneySourcePath' }
 local RARE_ACTIONS = { none = 'ne rien faire', leave = 'quitter le serveur', sell = 'aller vendre' }
 local settingsRaw -- fichier lu en entier : profils et champs du hub 0.4.0 conserves
 local function validKeyName(n)
@@ -1684,6 +1857,7 @@ local function validKeyName(n)
     return ok and k ~= nil
 end
 local function readPrefs(d, into)
+    if type(d.moneySourcePath)=='string' and #d.moneySourcePath<=512 and not d.moneySourcePath:find('%c') then into.moneySourcePath=d.moneySourcePath end
     if d.density=='normal' or d.density=='compact' then into.density=d.density end
     if type(d.accent) == 'string' and d.accent:match('^%x%x%x%x%x%x$') then into.accent = d.accent end
     if validKeyName(d.hotkey) then into.hotkey = d.hotkey end
@@ -1714,6 +1888,7 @@ end
 -- l'ancien overlay (12,12) etait cache sous les boutons Roblox en haut a gauche
 if ui.overlayPosition and ui.overlayPosition.y < 64 and ui.overlayPosition.x < 330 then ui.overlayPosition = nil end
 S.ui = ui
+S.moneySourcePath=ui.moneySourcePath
 local profiles = (type(settingsRaw) == 'table' and type(settingsRaw.profiles) == 'table') and settingsRaw.profiles or {}
 local function saveSettings()
     if type(writefile) ~= 'function' or not settingsWritable then return false end
@@ -2019,7 +2194,7 @@ function D.showMenu(visible,automatic)
     else
         D.animate(window,0.16,{GroupTransparency=1})
         D.animate(menuScale,0.18,{Scale=ui.scale*0.98})
-        if not ui.animations then window.Visible=false
+        if automatic or not ui.animations then window.Visible=false
         else task.delay(0.18,function()
             if S.running and token==D.visibilityToken and not D.menuVisible then window.Visible=false end
         end) end
@@ -2400,9 +2575,19 @@ function D.refreshServer()
 end
 function D.refreshVisuals()
     local h,m=S.hub,S.hub.money
-    local snap=h:snapshot(os.clock());local rate=snap.hourly and string.format('%.0f $/h',snap.hourly) or 'N/D'
-    D.value('cash',shortMoney(m.cash));D.value('earned',shortMoney(m.earned));D.value('deposited',shortMoney(m.deposited));D.value('hourly',rate)
+    local snap=h:snapshot(os.clock());local observedFor=m.observedStartedAt and math.max(0,os.clock()-m.observedStartedAt) or 0
+    local rate=observedFor>=60 and string.format('%.0f $/h',m.observedIncreases*3600/observedFor) or 'N/D'
+    D.value('cash',shortMoney(S.moneyReading and S.moneyReading.available and S.moneyReading.value or nil));D.value('earned',shortMoney(m.observedIncreases));D.value('deposited',shortMoney(m.deposited));D.value('hourly',rate)
     D.value('sales',m.sales);D.value('deposits',m.deposits);D.value('baitUsed',m.baitUsed);D.value('baitAdded',m.baitAdded)
+    D.value('saleEarnings',shortMoney(m.earned));D.value('observedDown',shortMoney(m.observedDecreases))
+    D.value('fishingInput',S.fishingInputStatus or (S.baitScreenPoint and 'Écran enregistré' or 'Visée à capturer'))
+    local state=S.moneyReading
+    local masked=state and (state.status:find('masque',1,true) or state.status:find('non visible',1,true))
+    D.value('moneyStatus',state and (state.available and 'Actif' or (masked and 'Masqué' or (#S.moneyCandidates>0 and 'À choisir' or 'Non trouvé'))) or 'Recherche')
+    if D.lists.moneySources then
+        local rows={};for _,entry in ipairs(S.moneyCandidates or {}) do rows[#rows+1]={title=entry.text,sub=entry.path,badge='CHOISIR',key=entry.path} end
+        D.lists.moneySources:set(rows);D.lists.moneySources.root.Visible=S.showMoneySources==true
+    end
     D.value('casts',S.castAttempts);D.value('clicks',S.clicks);D.value('activity',D.stateText(S.state,''));D.value('carName',S.car and S.car.name or 'Aucun véhicule')
     D.value('activeSpot',h.activeSpot or 'Aucun spot');D.value('spotsCount',countKeys(h.library.spots));D.value('routesCount',countKeys(h.library.routes));D.value('recordedPoints',#S.recordBuffer)
     D.value('farmPlanted',h.farm.planted);D.value('farmHarvested',h.farm.harvested);D.value('farmCycles',h.farm.cycles);D.value('farmStatus',h.farm.available and 'Adaptateur chargé' or 'Indisponible')
@@ -2427,7 +2612,7 @@ function D.refreshVisuals()
     end
     for _,meta in pairs(D.pages) do
         local vals
-        if meta.name=='Money' then vals={shortMoney(m.earned),shortMoney(m.cash),rate}
+        if meta.name=='Money' then vals={shortMoney(m.observedIncreases),shortMoney(S.moneyReading and S.moneyReading.available and S.moneyReading.value or nil),rate}
         elseif meta.name=='Vehicle' then vals={S.car and S.car.name or '—',tostring(countKeys(h.library.routes)),tostring(#S.recordBuffer)}
         elseif meta.name=='Server' then vals={S.server and tostring(S.server.count) or '—',S.server and tostring(S.server.maxPlayers or '?') or '—',isNum(D.lastPing) and string.format('%.0f ms',D.lastPing*1000) or 'N/D'}
         elseif meta.name=='Farming' then vals={tostring(h.farm.planted),tostring(h.farm.harvested),tostring(h.farm.cycles)}
@@ -2618,6 +2803,7 @@ section(home,'Session de pêche')
 S.design.gauge(home,'inventory','Inventaire')
 S.design.metricsGrid(home,{{id='casts',label='LANCERS'},{id='clicks',label='CLICS MINI-JEU'}})
 S.design.detail(home,'activeSpot','Spot actif','Aucun spot')
+S.design.detail(home,'fishingInput','Visée / clics','En attente')
 logLabel = notice(home, '', 128)
 logLabel.Visible = false
 logLabel.TextSize = 11; logLabel.Font = Enum.Font.Code
@@ -2633,24 +2819,24 @@ section(home, 'SPOTS DE PECHE')
 S.design.caption(home,'Enregistre cet endroit avec sa visée, puis retrouve-le ici.')
 local spotName = textbox(home, 'Nom du spot')
 grid(home, {
-    { 'Enregistrer ce spot', function() result(S.saveSpot(spotName.Text)) end },
-    { 'Selectionner le spot', function() result(S.selectSpot(spotName.Text)) end },
+    { 'Enregistrer ce spot', function() local ok,msg,name=S.saveSpot(spotName.Text);if ok then spotName.Text=name end;result(ok,msg) end },
+    { 'Selectionner le spot', function() local ok,msg,name=S.selectSpot(spotName.Text);if ok then spotName.Text=name end;result(ok,msg) end },
     { 'Supprimer ce spot', function() result(S.removeLibraryItem('spot', spotName.Text)) end },
     { 'Sauvegarder la bibliotheque', function() result(S.saveLibrary()) end },
 })
 button(home, 'Capturer la visee dans 3 secondes', function()
     local tok = S.token
+    local expectedSpot = S.hub.activeSpot
     S.toast('Place la souris sur l\'eau : capture dans 3 s', 'info')
     task.delay(3, function()
         if not alive(tok) then return end
-        local m = UIS:GetMouseLocation(); S.baitScreenPoint = Vector2.new(m.X, m.Y)
-        result(true, 'Visee capturee ; enregistrer un nouveau spot pour la conserver')
+        result(S.captureAimNow(expectedSpot))
     end)
 end)
 button(home, 'Reprendre la peche apres STOP', function()
     result(S.resume(), S.inventoryFull and 'Inventaire plein : liberer avant de reprendre' or 'Reprise demandee')
 end)
-S.design.rowList(home,'spots',5,'Aucun spot enregistré').onSelect=function(row) spotName.Text=row.title end
+S.design.rowList(home,'spots',5,'Aucun spot enregistré').onSelect=function(row) spotName.Text=row.title;result(S.selectSpot(row.title)) end
 S.design.detail(home,'spotsCount','Spots enregistrés','0')
 
 local vehicle = page('Vehicle')
@@ -2685,12 +2871,27 @@ grid(vehicle, {
 
 local money = page('Money')
 section(money, 'MONEY MANAGER / SESSION')
-S.design.metricsGrid(money,{{id='cash',label='PORTEFEUILLE OBSERVÉ'},{id='earned',label='GAINS DE VENTES'},{id='deposited',label='TOTAL DÉPOSÉ'},{id='hourly',label='ESTIMATION / HEURE'}})
+S.design.metricsGrid(money,{{id='cash',label='PORTEFEUILLE OBSERVÉ'},{id='earned',label='HAUSSES OBSERVÉES'},{id='deposited',label='TOTAL DÉPOSÉ'},{id='hourly',label='ESTIMATION / HEURE'}})
 S.views.money = S.design.widgets.cash
-S.design.caption(money,'Montants observés · estimation après 60 secondes')
+S.design.caption(money,'Hausses du compteur observé · attribution aux ventes séparée')
+S.design.badge(money,'moneyStatus','Lecture du portefeuille','Recherche')
 section(money,'Ventes & dépôts')
-S.design.metricsGrid(money,{{id='sales',label='VENTES MESURÉES'},{id='deposits',label='DÉPÔTS OBSERVÉS'},{id='baitUsed',label='APPÂTS EN MOINS'},{id='baitAdded',label='APPÂTS AJOUTÉS'}})
-button(money, 'Actualiser le solde observe', function() result(S.refreshMoney()) end)
+S.design.metricsGrid(money,{{id='sales',label='VENTES MESURÉES'},{id='deposits',label='DÉPÔTS OBSERVÉS'},{id='baitUsed',label='APPÂTS EN MOINS'},{id='baitAdded',label='APPÂTS AJOUTÉS'},{id='saleEarnings',label='REVENUS DE VENTES'},{id='observedDown',label='BAISSES OBSERVÉES'}})
+button(money, 'Actualiser le solde observe', function() result(S.refreshMoney());S.refreshDashboard() end)
+button(money,'Rechercher / choisir le compteur',function()
+    S.showMoneySources=true;result(S.searchMoneySources());S.refreshDashboard()
+end)
+S.design.caption(money,'Si la lecture échoue, choisis uniquement le compteur du portefeuille.')
+local moneySources=S.design.rowList(money,'moneySources',10,'Aucun compteur monétaire visible')
+moneySources.root.Visible=false
+moneySources.onSelect=function(row)
+    local ok,msg=S.chooseMoneySource(row.key)
+    if ok then ui.moneySourcePath=S.moneySourcePath;saveSettings();S.showMoneySources=false end
+    result(ok,msg);S.refreshDashboard()
+end
+button(money,'Revenir à la lecture automatique',function()
+    ui.moneySourcePath=nil;result(S.resetMoneySource());saveSettings();S.refreshDashboard()
+end)
 button(money, 'Lancer le cycle vente / ATM / retour', function() result(S.runCycle()) end)
 toggle(money, function() return 'Depot ATM : ' .. (S.autoBank and 'actif' or 'inactif') end,
     function() if not S.cycleRunning then S.autoBank = not S.autoBank end end)
@@ -2886,6 +3087,7 @@ local function applyPrefs()
     overlay.Visible = ui.overlay
     metrics.Visible = ui.metrics
     S.setSpeedPreset(ui.speedPreset)
+    S.configureMoneySource(ui.moneySourcePath)
     if S.design.picker then S.design.picker.sync(ui.accent) end
     if S.design.scaleSlider then S.design.scaleSlider.sync(ui.scale) end
     if ui.size then window.Size = UDim2.fromOffset(ui.size.x, ui.size.y) end
@@ -2957,9 +3159,8 @@ adv(grid(settingsPage, {
         logLine('Place la souris sur l\'eau : capture dans 3 s')
         task.delay(3, function()
             if not alive(aimToken) then return end
-            local m = UIS:GetMouseLocation()
-            S.baitScreenPoint = Vector2.new(m.X, m.Y)
-            logLine(string.format('Visee enregistree a %.0f, %.0f', m.X, m.Y))
+            local ok,msg=S.captureAimNow();logLine(msg)
+            if S.toast then S.toast(msg,ok and 'ok' or 'warn') end
         end)
     end },
 }))
@@ -3182,42 +3383,136 @@ local function findMinigame()
         end
     end
 end
-local function sendClick(tok)
-    if not alive(tok) or S.paused then return false, 'annule' end
-    if type(mouse1click) == 'function' then
-        if pcall(mouse1click) then return true, 'mouse1click' end
+-- Entrees de peche ciblees sur Roblox ; aucun clic OS lorsque la fenetre perd le focus.
+S.inputFocused=true;S.focusKnown=false;S.inputEpoch=0;S.castPending=false;S.aimRetryAt=0
+function S.isFishingInputActive()
+    if type(isrbxactive)=='function' then
+        local ok,active=pcall(isrbxactive)
+        if ok and type(active)=='boolean' then S.inputFocused=active;S.focusKnown=true end
     end
-    if type(mouse1press) == 'function' and type(mouse1release) == 'function' then
-        if pcall(function() mouseHeld = true; mouse1press(); task.wait(0.025); if alive(tok) then releaseMouse() end end) then return alive(tok), 'mouse1press/release' end
-    end
-    if not alive(tok) then return false, 'annule' end
-    local ok = pcall(function()
-        local pos = UIS:GetMouseLocation()
-        VIM:SendMouseButtonEvent(pos.X, pos.Y, 0, true, game, 0)
-        VIM:SendMouseButtonEvent(pos.X, pos.Y, 0, false, game, 0)
-    end)
-    if ok then return true, 'VirtualInputManager' end
-    return false, 'aucune methode de clic'
+    return S.inputFocused~=false
 end
-local lastMinigameEnd, minigameWasVisible = nil, false
-local firstCastAt = os.clock() + 3
-local function aimAtSavedPoint()
-    local pt = S.baitScreenPoint
-    if pt then pcall(function() VIM:SendMouseMoveEvent(pt.X, pt.Y, game) end) end
+connect(UIS.WindowFocusReleased,function()
+    S.inputFocused=false;S.focusKnown=true;S.inputEpoch=S.inputEpoch+1;releaseMouse()
+    S.fishingInputStatus='Peche en pause : Roblox hors focus'
+end)
+connect(UIS.WindowFocused,function()
+    S.inputFocused=true;S.focusKnown=true;S.inputEpoch=S.inputEpoch+1
+    S.fishingInputStatus='Roblox au premier plan'
+end)
+local function pointerInside(point)
+    local camera=workspace.CurrentCamera;local v=camera and camera.ViewportSize
+    return point and v and isNum(point.X) and isNum(point.Y) and point.X>=0 and point.Y>=0 and point.X<v.X and point.Y<v.Y
+end
+local function moveFishingPointer(point,tok,epoch)
+    if not alive(tok) or S.inputEpoch~=epoch or not S.isFishingInputActive() or not pointerInside(point) then return false,'Visee hors ecran ou Roblox sans focus' end
+    local ok,err=pcall(function() VIM:SendMouseMoveEvent(point.X,point.Y,game) end)
+    if not ok then return false,'Deplacement de visee refuse : '..tostring(err) end
+    if not sleep(0.04,tok) then return false,'annule' end -- laisser le moteur actualiser Mouse.Hit
+    if S.inputEpoch~=epoch or not S.isFishingInputActive() then return false,'Roblox a perdu le focus' end
+    local current=UIS:GetMouseLocation()
+    if not pointerInside(current) or math.abs(current.X-point.X)>4 or math.abs(current.Y-point.Y)>4 then return false,'Visee non confirmee par le moteur' end
+    return true
+end
+local function minigamePoint(target,panel)
+    if not target or not target.Parent or not shown(target) then return nil end
+    local pos=target.AbsolutePosition+target.AbsoluteSize/2
+    if not pointerInside(pos) then return nil end
+    -- Coordonnees observees du GUI ; les variantes d'inset sont choisies par hit-test.
+    if pg.GetGuiObjectsAtPosition then
+        local options={pos}
+        local ok,inset=pcall(function() return game:GetService('GuiService'):GetGuiInset() end)
+        if ok and inset then options[#options+1]=Vector2.new(pos.X+inset.X,pos.Y+inset.Y) end
+        for _,candidate in ipairs(options) do
+            local good,objects=pcall(function() return pg:GetGuiObjectsAtPosition(candidate.X,candidate.Y) end)
+            if good then
+                for _,object in ipairs(objects) do
+                    if ours(object) and (object:IsA('GuiButton') or object.Active) then break end
+                    if object==target or object:IsDescendantOf(target) then return candidate end
+                end
+            end
+        end
+        return nil
+    end
+    return pos
+end
+local function sendClick(tok,target,panel,epoch)
+    if not alive(tok) or S.paused or S.inputEpoch~=epoch or not S.isFishingInputActive() then return false,'annule ou hors focus' end
+    local point=minigamePoint(target,panel)
+    if not point then return false,'Barre du mini-jeu non accessible a l’ecran' end
+    local original=UIS:GetMouseLocation()
+    local pressed=false
+    local ok=pcall(function()
+        VIM:SendMouseMoveEvent(point.X,point.Y,game)
+        mouseHeld=true;mouseHeldVia='native'
+        VIM:SendMouseButtonEvent(point.X,point.Y,0,true,game,0);pressed=true
+        VIM:SendMouseButtonEvent(point.X,point.Y,0,false,game,0)
+        mouseHeld=false;mouseHeldVia=nil
+    end)
+    if ok then return true,'VirtualInputManager (barre)' end
+    releaseMouse()
+    if pressed then return false,'Relachement natif refuse : clic non repete' end
+    -- Compatibilite historique seulement si le vrai curseur etait deja dans la barre
+    -- et si le focus a ete observe, jamais de mouse1click a une position inconnue.
+    if not alive(tok) or S.inputEpoch~=epoch or not S.focusKnown or not S.isFishingInputActive() then return false,'Clic natif refuse' end
+    local a,b=target.AbsolutePosition,target.AbsoluteSize
+    local inside=pointerInside(original) and original.X>=a.X and original.X<=a.X+b.X and original.Y>=a.Y and original.Y<=a.Y+b.Y
+    if inside and type(mouse1click)=='function' and pcall(mouse1click) then return true,'mouse1click (barre sous curseur)' end
+    return false,'Clic natif refuse ; reviens sur la barre dans Roblox'
+end
+local lastMinigameEnd,minigameWasVisible=nil,false
+local firstCastAt=os.clock()+3
+local function aimAtSavedPoint(tok,epoch)
+    local aim=S.fishingAim
+    if not aim and S.baitScreenPoint then aim={x=S.baitScreenPoint.X,y=S.baitScreenPoint.Y} end
+    if not aim then
+        if S.hub.activeSpot then return false,'Capture d’abord la visee de ce spot sur l’eau' end
+        return pointerInside(UIS:GetMouseLocation()),'Curseur a placer dans Roblox'
+    end
+    local point=Vector2.new(aim.x,aim.y);local camera=workspace.CurrentCamera
+    if aim.world then
+        local ok,screen,onScreen=pcall(function() return camera:WorldToViewportPoint(v3(aim.world)) end)
+        if not ok or not onScreen or not screen or screen.Z<=0 then return false,'Le point du spot est hors champ : oriente la camera vers l’eau' end
+        point=Vector2.new(screen.X,screen.Y)
+    elseif aim.viewport and (aim.viewport.x~=camera.ViewportSize.X or aim.viewport.y~=camera.ViewportSize.Y) then
+        return false,'La resolution a change : recapturer la visee ecran'
+    end
+    local moved,why=moveFishingPointer(point,tok,epoch)
+    if not moved then return false,why end
+    if aim.world then
+        local deadline=os.clock()+0.25
+        repeat
+            if not alive(tok) or S.inputEpoch~=epoch or not S.isFishingInputActive() then return false,'annule ou hors focus' end
+            local ok,hit=pcall(function() return player:GetMouse().Hit.Position end)
+            if ok and hit and (hit-v3(aim.world)).Magnitude<=6 then return true end
+            if not sleep(0.05,tok) then return false,'annule' end
+        until os.clock()>=deadline
+        return false,'Visee monde non confirmee : eau masquee ou mise a jour refusee'
+    end
+    return true
 end
 local function tryCast(now)
-    if not S.autoCast or not S.fishingEnabled or S.paused or S.inventoryFull or S.cycleRunning or S.baitEmpty then return end
-    if now < firstCastAt or now - lastCast < S.retryDelay then return end
-    if lastMinigameEnd and now - lastMinigameEnd < S.castDelay then return end
-    local tool = fishingTool()
-    if not tool then update('equipe la canne pour le lancer auto | clics ' .. S.clicks); return end
-    aimAtSavedPoint()
-    lastCast = now
-    S.castAttempts = S.castAttempts + 1
-    S.spotEvent('casts')
-    local ok, err = pcall(function() tool:Activate() end)
-    if ok then update('lancer ' .. S.castAttempts .. ' (' .. tool.Name .. ')')
-    else update('erreur lancer : ' .. tostring(err):sub(1, 70)) end
+    if S.castPending or not S.autoCast or not S.fishingEnabled or S.paused or S.inventoryFull or S.cycleRunning or S.baitEmpty then return end
+    if not S.isFishingInputActive() then S.fishingInputStatus='Peche en pause : Roblox hors focus';return end
+    if now<firstCastAt or now<S.aimRetryAt or now-lastCast<S.retryDelay then return end
+    if lastMinigameEnd and now-lastMinigameEnd<S.castDelay then return end
+    local tool=fishingTool()
+    if not tool then update('Equipe la canne pour le lancer auto');return end
+    local tok,epoch=S.token,S.inputEpoch;S.castPending=true
+    local ticket={};S.castTicket=ticket
+    task.spawn(function()
+        local worked,err=pcall(function()
+            local aimed,why=aimAtSavedPoint(tok,epoch)
+            if not aimed then if alive(tok) and S.inputEpoch==epoch then S.aimRetryAt=os.clock()+2;S.fishingInputStatus=why;update(why) end;return end
+            if not alive(tok) or S.inputEpoch~=epoch or not S.isFishingInputActive() or S.paused or S.inventoryFull or S.cycleRunning or not S.fishingEnabled then return end
+            lastCast=os.clock();S.castAttempts=S.castAttempts+1;S.spotEvent('casts')
+            local activated,why2=pcall(function() tool:Activate() end)
+            S.fishingInputStatus=activated and 'Lancer avec visee confirmee' or tostring(why2)
+            update(activated and ('lancer '..S.castAttempts..' ('..tool.Name..')') or ('Erreur lancer : '..tostring(why2)))
+        end)
+        if S.castTicket==ticket then S.castPending=false end
+        if not worked and alive(tok) then S.hub:error('Lancer',err,os.clock());S.fishingInputStatus=tostring(err) end
+    end)
 end
 local currentPanel, lastX, lastT, lastClick, lastTarget, lastTries = nil, nil, nil, -100, nil, nil
 local armed, exitedAfterClick, clickX, pending, roundsInPanel = true, false, nil, false, 0
@@ -3242,7 +3537,7 @@ table.insert(conns, RunService.Heartbeat:Connect(function()
         end
         if now >= nextCheck then
             nextCheck = now + 0.8
-            S.checkInventory(); checkBait(); refreshInfo()
+            S.checkInventory(); checkBait(); S.pollMoney(false); refreshInfo()
             if not S.paused then S.scanCatch(now) end
             if S.refreshDashboard then S.refreshDashboard() end
             local spot = S.hub.activeSpot and S.hub.library.spots[S.hub.activeSpot]
@@ -3284,6 +3579,9 @@ table.insert(conns, RunService.Heartbeat:Connect(function()
             end
         end
         if not S.fishingEnabled or S.paused or S.cycleRunning then return end
+        if not S.isFishingInputActive() then S.fishingInputStatus='Peche en pause : Roblox hors focus';return end
+        if UIS:GetFocusedTextBox() or S.design.pointer then S.fishingInputStatus='Saisie ou reglage en cours : peche en pause';return end
+        if S.lastFishingEpoch~=S.inputEpoch then resetPanel(nil);S.lastFishingEpoch=S.inputEpoch end
         local panel, target, needle = findMinigame()
         -- le menu ne doit pas recevoir les clics du mini-jeu (clic a la position du curseur)
         if panel then S.minigameSeenAt = os.clock() end
@@ -3327,11 +3625,12 @@ table.insert(conns, RunService.Heartbeat:Connect(function()
             armed = false; pending = true; exitedAfterClick = false; lastClick = now; clickX = x
             roundsInPanel = roundsInPanel + 1; S.rounds = S.rounds + 1
             local clickToken = S.token
+            local clickEpoch = S.inputEpoch
             task.spawn(function()
                 if not alive(clickToken) or S.paused then pending = false; return end
-                local success, method = sendClick(clickToken)
+                local success, method = sendClick(clickToken,target,panel,clickEpoch)
                 pending = false
-                if not alive(clickToken) or S.paused then return end
+                if not alive(clickToken) or S.paused or clickEpoch~=S.inputEpoch or not S.isFishingInputActive() then return end
                 S.method = method
                 if success then
                     S.clicks = S.clicks + 1
@@ -3352,6 +3651,7 @@ end))
 ---------------------------------------------------------------------------
 connect(UIS.InputBegan, function(input, processed)
     if not S.running then return end
+    S.inputFocused=true;S.focusKnown=true
     if input.KeyCode == Enum.KeyCode.F12 then S.cancel(); return end
     if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
     if capturing then
@@ -3399,6 +3699,7 @@ function S.stop()
     if not S.running then return end
     S.token = S.token + 1
     S.running = false
+    if S.detachMoneySource then S.detachMoneySource() end
     if S.design then S.design.cleanup() end
     S.recording = false
     S.hub.farm.running = false

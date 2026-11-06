@@ -1,5 +1,15 @@
 # Historique
 
+## 1.1.1 — 2026-11-06 (correctifs à valider dans Roblox)
+
+- Money se rafraîchit automatiquement depuis un compteur fiable ou une valeur publique réellement répliquée. Cache/signaux et scans bornés ; choix explicite si les données sont ambiguës.
+- Hausses observées distinctes des revenus de ventes, estimation horaire fondée sur la période d’observation, état clair si le compteur manque.
+- Nom de spot vide automatiquement rempli, visée rattachée au spot actif et point de retour du cycle actualisé en mémoire.
+- Visée monde reprojetée, attente du moteur avant activation de la canne ; clics envoyés à la barre détectée plutôt qu’au curseur courant.
+- Masquage automatique immédiat pour ne pas intercepter le clic. Pause sur perte de focus, saisie ou réglage ; aucune garantie de clic en arrière-plan.
+- 373 vérifications locales réussies, dont 63 cas supplémentaires. Aucun nouveau test réel Roblox/Xeno de cette correction.
+
+
 ## 1.1.0 — 2026-11-06 (validation Roblox requise)
 
 - Palette HSV choisie à la souris ou au tactile, aperçu, application/annulation et conservation de l’hex/palette/profils.

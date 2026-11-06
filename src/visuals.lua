@@ -247,9 +247,19 @@ function D.refreshServer()
 end
 function D.refreshVisuals()
     local h,m=S.hub,S.hub.money
-    local snap=h:snapshot(os.clock());local rate=snap.hourly and string.format('%.0f $/h',snap.hourly) or 'N/D'
-    D.value('cash',shortMoney(m.cash));D.value('earned',shortMoney(m.earned));D.value('deposited',shortMoney(m.deposited));D.value('hourly',rate)
+    local snap=h:snapshot(os.clock());local observedFor=m.observedStartedAt and math.max(0,os.clock()-m.observedStartedAt) or 0
+    local rate=observedFor>=60 and string.format('%.0f $/h',m.observedIncreases*3600/observedFor) or 'N/D'
+    D.value('cash',shortMoney(S.moneyReading and S.moneyReading.available and S.moneyReading.value or nil));D.value('earned',shortMoney(m.observedIncreases));D.value('deposited',shortMoney(m.deposited));D.value('hourly',rate)
     D.value('sales',m.sales);D.value('deposits',m.deposits);D.value('baitUsed',m.baitUsed);D.value('baitAdded',m.baitAdded)
+    D.value('saleEarnings',shortMoney(m.earned));D.value('observedDown',shortMoney(m.observedDecreases))
+    D.value('fishingInput',S.fishingInputStatus or (S.baitScreenPoint and 'Écran enregistré' or 'Visée à capturer'))
+    local state=S.moneyReading
+    local masked=state and (state.status:find('masque',1,true) or state.status:find('non visible',1,true))
+    D.value('moneyStatus',state and (state.available and 'Actif' or (masked and 'Masqué' or (#S.moneyCandidates>0 and 'À choisir' or 'Non trouvé'))) or 'Recherche')
+    if D.lists.moneySources then
+        local rows={};for _,entry in ipairs(S.moneyCandidates or {}) do rows[#rows+1]={title=entry.text,sub=entry.path,badge='CHOISIR',key=entry.path} end
+        D.lists.moneySources:set(rows);D.lists.moneySources.root.Visible=S.showMoneySources==true
+    end
     D.value('casts',S.castAttempts);D.value('clicks',S.clicks);D.value('activity',D.stateText(S.state,''));D.value('carName',S.car and S.car.name or 'Aucun véhicule')
     D.value('activeSpot',h.activeSpot or 'Aucun spot');D.value('spotsCount',countKeys(h.library.spots));D.value('routesCount',countKeys(h.library.routes));D.value('recordedPoints',#S.recordBuffer)
     D.value('farmPlanted',h.farm.planted);D.value('farmHarvested',h.farm.harvested);D.value('farmCycles',h.farm.cycles);D.value('farmStatus',h.farm.available and 'Adaptateur chargé' or 'Indisponible')
@@ -274,7 +284,7 @@ function D.refreshVisuals()
     end
     for _,meta in pairs(D.pages) do
         local vals
-        if meta.name=='Money' then vals={shortMoney(m.earned),shortMoney(m.cash),rate}
+        if meta.name=='Money' then vals={shortMoney(m.observedIncreases),shortMoney(S.moneyReading and S.moneyReading.available and S.moneyReading.value or nil),rate}
         elseif meta.name=='Vehicle' then vals={S.car and S.car.name or '—',tostring(countKeys(h.library.routes)),tostring(#S.recordBuffer)}
         elseif meta.name=='Server' then vals={S.server and tostring(S.server.count) or '—',S.server and tostring(S.server.maxPlayers or '?') or '—',isNum(D.lastPing) and string.format('%.0f ms',D.lastPing*1000) or 'N/D'}
         elseif meta.name=='Farming' then vals={tostring(h.farm.planted),tostring(h.farm.harvested),tostring(h.farm.cycles)}

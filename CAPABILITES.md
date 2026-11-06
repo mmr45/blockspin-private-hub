@@ -1,3 +1,17 @@
+# Correctifs V1.1.1 — 2026-11-06
+
+Retour utilisateur confirmé par captures en V1.1.0 : l’UI s’affiche, mais le compteur Money n’est pas lu et les entrées pêche dépendent du curseur/focus. Les corrections ci-dessous sont **simulées seulement**, pas validées dans Roblox/Xeno.
+
+| Correction | Preuve locale | Limite |
+|---|---|---|
+| Lecture du portefeuille | Cache, mises à jour de texte/valeur/attribut public, ambiguïté, source masquée/recréée, sélection et nettoyage | Une donnée doit réellement être visible ou répliquée ; aucun montant inventé |
+| Spots/visée | Noms automatiques, capture après création, sauvegarde de point monde, reprojection et attente de traitement | Anciennes visées écran à recapturer ; eau visible et entrées natives acceptées |
+| Clic mini-jeu | Curseur hors écran avec clic natif sur la barre, hit-test d’inset, focus, annulation et saisie | Acceptation de l’API simulée ne prouve pas la réussite du mini-jeu réel ; arrière-plan non garanti |
+
+**373 vérifications locales, 0 échec.** Données/routes de référence conservées. Voir `tests/VALIDATION_V111.md`.
+
+---
+
 # Capacités V1.1.0 — 2026-11-06
 
 **310 vérifications réussies en simulation ; aucun essai réel de rendu Roblox/Xeno de cette version.**

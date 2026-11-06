@@ -140,6 +140,9 @@ function Inst:Destroy()
     self:SetParent(nil); self.destroyed = true
 end
 function Inst:GetAttribute(k) return self.attrs and self.attrs[k] end
+function Inst:GetAttributes() local out={};for k,v in pairs(self.attrs or {}) do out[k]=v end;return out end
+function Inst:GetAttributeChangedSignal(k) return self:GetPropertyChangedSignal('Attribute:'..k) end
+function Inst:SetAttribute(k,v) self.attrs=self.attrs or {};self.attrs[k]=v;self:GetAttributeChangedSignal(k):Fire() end
 function Inst:ClearAllChildren() self._children = {} end
 function Inst:GetPropertyChangedSignal(p) self._propSignals[p] = self._propSignals[p] or Signal(); return self._propSignals[p] end
 
@@ -176,7 +179,7 @@ function hum:MoveTo(p) M.moveTarget = p end
 function hum:EquipTool(t) t.Parent = char end
 function hum:UnequipTools() for _, c in ipairs(char:GetChildren()) do if c.ClassName == 'Tool' then c.Parent = backpack end end end
 local rod = new('Tool', 'Fishing Rod', char)
-function rod:Activate() M.casts = (M.casts or 0) + 1 end
+function rod:Activate() M.casts = (M.casts or 0) + 1;M.lastCastMouse={X=M.mouseX,Y=M.mouseY};M.lastCastAt=M.clock end
 
 -- GUI du jeu (imitation)
 local items = new('ScreenGui', 'Items', pg)
@@ -231,9 +234,14 @@ function M.setRoot(pos) root.Position = pos; root.CFrame = CFrame.new(pos.X, pos
 
 -- Services ------------------------------------------------------------------
 local RunService = { Heartbeat = Signal(), RenderStepped = Signal() }
-local UIS = { InputBegan = Signal(), InputChanged = Signal(), InputEnded = Signal(), WindowFocusReleased = Signal(), focused = nil }
+local UIS = { InputBegan = Signal(), InputChanged = Signal(), InputEnded = Signal(), WindowFocusReleased = Signal(), WindowFocused=Signal(), focused = nil }
 workspace.CurrentCamera = new('Camera','CurrentCamera',workspace,{ ViewportSize = Vector2.new(1920,1080) })
 function player:GetNetworkPing() return 0.05 end
+function player:GetMouse() return {Hit={Position=M.mouseWorld}} end
+function workspace.CurrentCamera:WorldToViewportPoint(point)
+    if M.projectedPoint then return M.projectedPoint,M.projectedVisible~=false end
+    error('projection non configuree dans la maquette')
+end
 function player:Kick(msg) M.kicked = msg end
 function UIS:GetFocusedTextBox() return self.focused end
 function UIS:GetMouseLocation() return Vector2.new(M.mouseX or 0, M.mouseY or 0) end
@@ -248,8 +256,14 @@ function VIM:SendKeyEvent(down, code, rep, g)
     table.insert(M.keyLog, (down and '+' or '-') .. code.Name)
     if down and code.Name == 'E' then M.onE() end
 end
-function VIM:SendMouseMoveEvent(x, y) M.mouseX, M.mouseY = x, y end
+function VIM:SendMouseMoveEvent(x,y)
+    if M.failMouseMove then error('mouvement refuse') end
+    M.lastMoveAt=M.clock
+    if M.deferMouseMove then M.pendingMouse={x,y} else M.mouseX,M.mouseY=x,y end
+end
 function VIM:SendMouseButtonEvent(x, y, b, down)
+    if M.failMouseButtons then error('clic natif refuse') end
+    M.mouseEvents=M.mouseEvents or {};M.mouseEvents[#M.mouseEvents+1]={x=x,y=y,down=down,at=M.clock}
     M.mouseX, M.mouseY = x, y
     if down then
         M.mouseDownAt = M.clock
@@ -318,7 +332,8 @@ function TweenService:Create(o, info, props) M.tweenCount=(M.tweenCount or 0)+1
         self.PlaybackState=Enum.PlaybackState.Cancelled;self.Completed:Fire(self.PlaybackState)
     end
     return tween end
-local services = { TweenService = TweenService, Players = Players, RunService = RunService, UserInputService = UIS, VirtualInputManager = VIM, HttpService = Http, PathfindingService = Path }
+local GuiService={GetGuiInset=function() return Vector2.new(0,36),Vector2.new(0,0) end}
+local services = { GuiService=GuiService, TweenService = TweenService, Players = Players, RunService = RunService, UserInputService = UIS, VirtualInputManager = VIM, HttpService = Http, PathfindingService = Path }
 game = DataModel
 game.JobId='mock-job-123';game.PlaceId=104715542330896
 function DataModel:GetService(n) return services[n] or error('service inconnu ' .. n) end
@@ -350,6 +365,7 @@ task = {
 
 function M.tick(dt)
     M.clock = M.clock + dt
+    if M.pendingMouse then M.mouseX,M.mouseY=M.pendingMouse[1],M.pendingMouse[2];M.pendingMouse=nil;M.mouseProcessedAt=M.clock end
     -- physique
     if hum.SeatPart == seat and M.car then
         M.car:step(dt, { fwd = M.keys.W, back = M.keys.S, left = M.keys.A, right = M.keys.D })

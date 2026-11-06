@@ -103,7 +103,7 @@ M.click('Animations :')
 local prefs = py_json_decode(M.fs['blockspin-settings-v1.json'])
 check('reglages : accent libre et animations sauvegardes', prefs.accent=='12ABEF' and prefs.animations==false)
 M.run(2)
-check('dashboard : affiche les donnees de session', S.views.dashboard.Text:find('Session',1,true) ~= nil and S.views.money.Text:find('N/D',1,true) ~= nil)
+check('dashboard : affiche les donnees de session', S.views.dashboard.Text:find('Session',1,true) ~= nil and S.views.money.Text:find('500',1,true) ~= nil)
 check('V1 : aucune erreur de tache inattendue', (M.taskErrors or 0)==0, M.lastTaskError)
 
 -- Argent raccorde au cycle complet, pas uniquement au module pur.
