@@ -1,3 +1,26 @@
+# Refonte de présentation V1 — 2026-11-06
+
+- Demande explicite : UI soignée inspirée des captures fournies, transitions fluides, avatar Roblox, DisplayName et @username. Ajouter à la PR #4, sans fusion.
+- Présentation dans `src/interface.lua`, injectée par `build.py` avec le noyau et les trajets. `src/main.lua` reste l’unique script actif généré.
+- Barre latérale, cartes en deux colonnes, vrais interrupteurs, palette avec rouge par défaut, profils et réglages existants conservés. Mode compact, résolution/caméra suivies.
+- Miniature officielle `GetUserThumbnailAsync`, trois tentatives maximum, image réellement chargée avant masquage du remplacement, résultat tardif ignoré après fermeture.
+- Transitions annulables et nettoyées ; mode sans animation ; réduction/réouverture et STOP indépendant. Aucun nouveau raccourci ni automatisme de jeu.
+- 251 vérifications locales réussies (205 antérieures + 46 UI), build et statique réussis. Inspection de maquettes HTML issues de l’arbre Lua simulé ; **aucun rendu réel Roblox/Xeno confirmé**.
+
+# Mise à jour V1.0.0 — 2026-11-06
+
+- Base distante vérifiée : `main` 0.9.1, commit `c0da490fcbcaf60e9a9f3c3142dad508c3bd29bc`. Les mentions de `main` 0.4.0 plus bas sont historiques.
+- Travail sur `feat/v1.0.0-private-hub`, PR vers `main`, sans fusion automatique.
+- Sources : `src/cycle.lua` et noyau pur `src/hub_core.lua`. `build.py` injecte ce noyau et les données dans le seul script actif `src/main.lua` ; ne pas modifier le généré à la main.
+- Black Edition six onglets ; spots/destinations nommés ; bibliothèque `blockspin-library-v1.json` avec sauvegarde explicite et rejet atomique des fichiers invalides.
+- Money Manager et statistiques de session, superviseur partagé avec délais/annulation et tableau AFK. STOP suspend aussi les clics/lancers et invalide les actions différées. Vitesse finale mesurée requise pour annoncer un stationnement.
+- Moteur agricole multi-plantes/replantation simulé ; **aucun adaptateur BlockSpin ni interaction agricole réelle fourni**. Ne pas annoncer Auto Farm fonctionnel en jeu.
+- Tests : référence 0.9.1 = 120 vérifications ; V1 = 205 vérifications, 0 échec, Python 3.12 / lupa 2.8 / Lua 5.4. Build et contrôles statiques réussis. Aucun essai V1 Roblox/Xeno.
+- README image seule, loaders vers main, archives et `data/route_data.json` conservés. Aucune donnée de l'utilisateur écrasée automatiquement.
+- Prochain travail : suivre `tests/MANUAL.md`, caractériser les interfaces réelles vendeur/ATM et agricoles, recueillir une confirmation datée par version. Voir `tests/VALIDATION_V1.md`.
+
+---
+
 # Mémoire de projet : BlockSpin Auto Fish / cycle
 
 Mise à jour : 2026-11-05 (reprise par Claude). La version Codex d'origine est dans `sources_originales/memoire_codex/`.

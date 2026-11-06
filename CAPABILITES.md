@@ -1,3 +1,23 @@
+# Capacités V1.0.0 — 2026-11-06
+
+**Aucune fonction V1.0.0 confirmée en jeu.** Les confirmations historiques ci-dessous ne valident pas cette version. La base de travail est `main` 0.9.1 (`c0da490`).
+
+| Fonction V1 | Résultat vérifié | Limite restante |
+|---|---|---|
+| Pêche et cycle existants | Scénarios historiques conservés dans la maquette | Essais Roblox/Xeno requis |
+| Spots et statistiques par spot | Positions/visees exactes sauvegardées, sélection proche, attribution de session | Position du personnage ; textes/raretés heuristiques, visée liée à l'écran |
+| Destinations et enregistrement | Bibliothèque et tests du pilote, aller/retour conservés | Pas de calcul de route depuis un point arbitraire ; physique réelle non validée |
+| Stationnement | Succès exige vitesse mesurée ≤ 3 studs/s | Pas d'orientation finale ni calibration réelle |
+| Money Manager | Attribution vente, décimales, dépôt distinct et cycle complet simulés | Instantanés de GUI ; dépôt non prouvé côté serveur |
+| Culture/replantation | Moteur multi-plantes testé avec adaptateur local simulé | **Adaptateur BlockSpin absent : culture en jeu indisponible** |
+| Black Edition et AFK | Six onglets, profil officiel/avatar, cartes adaptatives, transitions, métriques et réglages testés en maquette | Rendu, miniature et entrées réels Roblox non testés |
+| Supervision et STOP | Expiration, exceptions, preuve absente, annulations testées | Dépend de la coopération des actions/adaptateurs ; arrêt physique non instantané |
+| Build et sécurité statique | Script généré exact, aucun nouveau remote, chargement distant ou déplacement direct | Ne constitue pas une validation du jeu |
+
+Résultats : **251 vérifications, 0 échec** sous Lua 5.4 avec `lupa==2.8`. Détails dans `tests/VALIDATION_V1.md`, essais réels dans `tests/MANUAL.md`.
+
+---
+
 # Matrice des capacités (mise à jour 2026-11-05)
 
 Légende de la colonne Résultat :

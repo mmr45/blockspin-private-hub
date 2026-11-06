@@ -2,7 +2,7 @@
 
 Lire `PROJECT_MEMORY.md` et `CAPABILITES.md` avant toute modification.
 
-- Modifier `src/cycle.lua` (jamais `src/main.lua`, généré), puis `python -I build.py`, `python -I tests/check_source.py` et `python -I tests/run_tests.py` (venv avec `lupa==2.8`).
+- Modifier `src/cycle.lua`, `src/hub_core.lua` et `src/interface.lua` (jamais `src/main.lua`, généré), puis `python -I build.py`, `python -I tests/check_source.py` et `python -I tests/run_tests.py` (venv avec `lupa==2.8`).
 - Pas de raccourcis clavier nouveaux : les actions passent par l'interface (seules RightShift et F12 restent).
 - Ne jamais affirmer qu'une fonction marche en jeu sans confirmation de l'utilisateur, datée et rattachée à une version.
 - Ne pas casser la pêche v0.6.8. Ne pas inventer de RemoteEvent, de GUI ou d'API de véhicule.

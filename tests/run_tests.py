@@ -49,6 +49,8 @@ print("== Tests purs (donnees + pilote sur modele cinematique simplifie) ==")
 lua = new_lua()
 lua.execute((ROOT / "tests" / "test_pure.lua").read_text(encoding="utf-8"))
 
+lua.execute((ROOT / "tests" / "test_v1_core.lua").read_text(encoding="utf-8"))
+
 print("== Tests d'integration (maquette Roblox) ==")
 fs = {}
 
@@ -81,6 +83,8 @@ g.py_json_decode = lambda s: to_lua(json.loads(s))
 g.MOCK_SOURCE = MOCK
 if "--pure" not in sys.argv:
     lua.execute((ROOT / "tests" / "test_integration.lua").read_text(encoding="utf-8"))
+    lua.execute((ROOT / "tests" / "test_v1_integration.lua").read_text(encoding="utf-8"))
+    lua.execute((ROOT / "tests" / "test_interface.lua").read_text(encoding="utf-8"))
 
 failed = [r for r in results if not r[1]]
 print("\n%d verifications, %d echec(s)" % (len(results), len(failed)))

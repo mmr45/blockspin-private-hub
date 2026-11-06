@@ -1,10 +1,10 @@
--- BlockSpin Hub v0.9.1
+-- BlockSpin Hub v1.0.0
 -- Peche auto (logique v0.6.8 conservee) + cycle vente/ATM par conduite NATIVE sur route
 -- (touches simulees W/A/S/D, aucun deplacement de CFrame, aucune teleportation).
 -- Aucun passage sous la carte : non implemente volontairement (voir README_v080.md).
 -- Arret complet : getgenv().BlockSpinCycle080.stop()
 -- Arret d'urgence du cycle/conduite (le script reste charge) : F12
-local VERSION = '0.9.1'
+local VERSION = '1.0.0'
 local E = (getgenv and getgenv()) or _G
 
 ---------------------------------------------------------------------------
@@ -24,6 +24,8 @@ local function fold(s)
     s = tostring(s or ''):gsub('\195[\128-\191]', FOLD):gsub('[\128-\255]', '')
     return (s:lower())
 end
+
+--@@HUB_CORE@@
 
 --@@DEFAULT_DATA@@
 
@@ -198,7 +200,9 @@ function Driver:step(o)
     if self.mode == 'STOPPING' then
         if c.brake and fwdSpeed > 1 and o.t - self.stopT < c.stopTimeout then
             cmd.back = true
-        elseif o.t - self.stopT >= 0.3 or not c.brake then
+        elseif speed > 3 and o.t - self.stopT >= c.stopTimeout then
+            return self:fail('stationnement non confirme : voiture encore en mouvement')
+        elseif speed <= 3 and o.t - self.stopT >= 0.3 then
             self.mode = 'DONE'
             self.status = string.format('ARRIVE (%.1f studs du dernier point, %.1f studs/s)', endDist, speed)
         end
@@ -284,7 +288,7 @@ function Driver:step(o)
 end
 
 if E.__BLOCKSPIN_PURE_TEST then
-    return { Driver = Driver, DRIVE_DEFAULTS = DRIVE_DEFAULTS, validateData = validateData, DEFAULT_DATA = DEFAULT_DATA, fold = fold }
+    return { Hub = Hub, Driver = Driver, DRIVE_DEFAULTS = DRIVE_DEFAULTS, validateData = validateData, DEFAULT_DATA = DEFAULT_DATA, fold = fold }
 end
 
 ---------------------------------------------------------------------------
@@ -328,6 +332,7 @@ local S = {
     cfg = { drive = {} }, log = {}, token = 0,
 }
 for k, v in pairs(DRIVE_DEFAULTS) do S.cfg.drive[k] = v end
+S.hub = Hub.new(os.clock())
 S.cfg.keys = { forward = Enum.KeyCode.W, back = Enum.KeyCode.S, left = Enum.KeyCode.A, right = Enum.KeyCode.D }
 E.BlockSpinCycle080 = S
 
@@ -347,6 +352,7 @@ local function logLine(msg)
 end
 local function setState(state, detail)
     if state ~= S.state then logLine('ETAT ' .. S.state .. ' -> ' .. state .. (detail and (' : ' .. detail) or '')) end
+    if state == 'ERROR' then S.hub:error(state, detail, os.clock()) end
     S.state = state
     S.detail = detail or ''
     if S.toast and state ~= S.lastToastState then
@@ -354,12 +360,12 @@ local function setState(state, detail)
         elseif state == 'NO_BAIT' then S.toast('Plus d\'appats : lancers arretes', 'error') end
     end
     S.lastToastState = state
-    local txt = state .. (S.detail ~= '' and (' | ' .. S.detail) or '')
+    local txt = S.design and S.design.stateText(state,S.detail) or (state .. (S.detail ~= '' and (' | ' .. S.detail) or ''))
     if stateLabel and stateLabel.Parent and stateLabel.Text ~= txt then stateLabel.Text = txt end
 end
 local function update(detail) -- detail sans changer d'etat (compat v0.6.8)
     S.detail = detail
-    local txt = S.state .. ' | ' .. tostring(detail)
+    local txt = S.design and S.design.stateText(S.state,detail) or (S.state .. ' | ' .. tostring(detail))
     if stateLabel and stateLabel.Parent and stateLabel.Text ~= txt then stateLabel.Text = txt end
 end
 
@@ -489,7 +495,7 @@ local function driveRoute(points3, label, tok)
     if not seat then return false, 'pas au volant' end
     local pts = {}
     for i, p in ipairs(points3) do pts[i] = { p[1], p[3] } end
-    local d = Driver.new(pts, S.cfg.drive)
+    local d = Driver.new(pts, Hub.copy(S.cfg.drive))
     S.driver = d
     local ok, res, msg = pcall(function()
         while true do
@@ -507,7 +513,7 @@ local function driveRoute(points3, label, tok)
             task.wait(S.cfg.drive.dt)
         end
     end)
-    releaseAll()
+    if alive(tok) then releaseAll() end
     if not ok then return false, 'erreur interne conduite : ' .. tostring(res) end
     if res and seat.AssemblyLinearVelocity.Magnitude > 3 then
         logLine('Attention : touches relachees mais la voiture roule encore (' .. math.floor(seat.AssemblyLinearVelocity.Magnitude) .. ' studs/s)')
@@ -519,6 +525,7 @@ end
 -- 8. MARCHE (Humanoid:MoveTo + PathfindingService, deplacement natif)
 ---------------------------------------------------------------------------
 local function walkTo(goal, radius, tok, what)
+    if not alive(tok) then return false, 'annule' end
     radius = radius or 5
     local hum, root = humanoid(), getRoot()
     if not hum or not root then return false, 'personnage absent' end
@@ -544,7 +551,7 @@ local function walkTo(goal, radius, tok, what)
             local p0 = root.Position
             local wpLimit = math.max(6, Vector3.new(p0.X - wp.Position.X, 0, p0.Z - wp.Position.Z).Magnitude / 8 + 2)
             while true do
-                if not alive(tok) then hum:MoveTo(root.Position); return false, 'annule' end
+                if not alive(tok) then return false, 'annule' end
                 if hum.SeatPart then return false, 'assis pendant la marche' end
                 if hum.Health <= 0 then return false, 'personnage mort' end
                 if flatDist() <= radius then hum:MoveTo(root.Position); return true end
@@ -632,6 +639,7 @@ local function nearbyPrompts(radius, within)
     return out
 end
 local function triggerPrompt(entry, tok)
+    if not alive(tok) then return 'annule' end
     local pr = entry.prompt
     if type(fireproximityprompt) == 'function' then
         local ok = pcall(fireproximityprompt, pr)
@@ -640,11 +648,13 @@ local function triggerPrompt(entry, tok)
     local code = pr.KeyboardKeyCode or Enum.KeyCode.E
     sendKey(code, true)
     sleep(math.max(0.15, (pr.HoldDuration or 0) + 0.2), tok)
-    sendKey(code, false)
+    if alive(tok) then sendKey(code, false) end
     return 'touche ' .. tostring(code)
 end
 local function pressE(tok)
-    sendKey(Enum.KeyCode.E, true); sleep(0.15, tok); sendKey(Enum.KeyCode.E, false)
+    if not alive(tok) then return end
+    sendKey(Enum.KeyCode.E, true); sleep(0.15, tok)
+    if alive(tok) then sendKey(Enum.KeyCode.E, false) end
 end
 local function promptByWords(radius, words)
     for _, e in ipairs(nearbyPrompts(radius)) do
@@ -656,6 +666,7 @@ end
 -- 10. ENTREE / SORTIE DE LA MEME VOITURE
 ---------------------------------------------------------------------------
 local function exitCar(tok)
+    if not alive(tok) then return false, 'annule' end
     local hum = humanoid()
     if not hum then return false, 'humanoid absent' end
     if not hum.SeatPart then return true, 'deja a pied' end
@@ -664,14 +675,17 @@ local function exitCar(tok)
     while os.clock() < t1 and alive(tok) and seat.AssemblyLinearVelocity.Magnitude > 2 do
         sendKey(S.cfg.keys.back, true); task.wait(0.1)
     end
+    if not alive(tok) then return false, 'annule' end
     sendKey(S.cfg.keys.back, false)
     hum.Jump = true
     if sleep(0.8, tok) and not hum.SeatPart then return true, 'sortie (saut)' end
+    if not alive(tok) then return false, 'annule' end
     pcall(function() hum.Sit = false end)
     if sleep(0.8, tok) and not hum.SeatPart then return true, 'sortie (Sit=false)' end
     return false, 'impossible de quitter le siege'
 end
 local function enterCar(tok)
+    if not alive(tok) then return false, 'annule' end
     if not carValid() then return false, 'voiture memorisee introuvable (disparue ?)' end
     local seat = S.car.seat
     if currentSeat() == seat then return true, 'deja au volant' end
@@ -683,6 +697,7 @@ local function enterCar(tok)
     local approach = ((a - root.Position).Magnitude < (b - root.Position).Magnitude) and a or b
     local ok, err = walkTo(approach, 3.5, tok, 'voiture')
     if not ok and (root.Position - seat.Position).Magnitude > 9 then return false, 'approche voiture : ' .. tostring(err) end
+    if not alive(tok) then return false, 'annule' end
     -- 1) ProximityPrompt de la voiture le plus proche du siege
     local best
     for _, e in ipairs(nearbyPrompts(15, S.car.model)) do
@@ -694,6 +709,7 @@ local function enterCar(tok)
         local how = triggerPrompt(best.entry, tok)
         if sleep(1.5, tok) and currentSeat() == seat then logLine('Entree voiture OK via prompt (' .. how .. ')'); return true, 'prompt' end
     end
+    if not alive(tok) then return false, 'annule' end
     -- 2) marcher sur le siege (contact = assise native d'un Seat Roblox)
     hum:MoveTo(seat.Position)
     local t1 = os.clock() + 3
@@ -701,6 +717,7 @@ local function enterCar(tok)
         if currentSeat() == seat then logLine('Entree voiture OK par contact'); return true, 'contact' end
         task.wait(0.1)
     end
+    if not alive(tok) then return false, 'annule' end
     -- 3) Seat:Sit cote client (peut etre refuse par le jeu)
     pcall(function() seat:Sit(hum) end)
     if sleep(1.2, tok) and currentSeat() == seat then logLine('Entree voiture OK via Seat:Sit'); return true, 'Sit' end
@@ -801,6 +818,7 @@ local function checkBait()
             logLine('Appats lus : x' .. found)
             if found == 0 and S.toast then S.toast('Plus d\'appats (x0) : lancers arretes', 'error') end
         end
+        S.hub:observeBait(found)
         S.baitCount = found; S.baitEmpty = (found == 0); S.baitUnknown = false
     end
 end
@@ -814,7 +832,10 @@ local function findMoney()
         if (obj:IsA('TextLabel') or obj:IsA('TextButton')) and not ours(obj) and shown(obj) then
             local txt = fold(obj.Text)
             local val = txt:match('equilibre des mains%s*:%s*%$?([%d, %.]+)') or txt:match('cash%s*:%s*%$?([%d, %.]+)')
-            if val then return tonumber((val:gsub('[^%d]', ''))), obj:GetFullName() end
+            if val then
+                local amount = Hub.parseMoney(val)
+                if amount then return amount, obj:GetFullName() end
+            end
         end
     end
 end
@@ -840,11 +861,15 @@ local function holdButton(button, seconds, tok)
         if not pressed then VIM:SendMouseButtonEvent(x, y, 0, true, game, 0) end
         sleep(seconds, tok)
     end)
-    releaseMouse()
-    pcall(function() VIM:SendMouseButtonEvent(x, y, 0, false, game, 0) end)
+    if alive(tok) then
+        releaseMouse()
+        pcall(function() VIM:SendMouseButtonEvent(x, y, 0, false, game, 0) end)
+    end
     return ok, err
 end
 local function sellAll(tok)
+    local cashBefore = findMoney()
+    S.hub:observeCash(cashBefore)
     local before = readCapacity(true)
     if not before then return false, 'compteur inventaire illisible avant vente' end
     for attempt = 1, 2 do
@@ -863,6 +888,8 @@ local function sellAll(tok)
         while os.clock() < t1 and alive(tok) do
             local after = readCapacity(true)
             if after and after.count < before.count then
+                local cashAfter = findMoney()
+                S.hub:transaction('sale-' .. tok .. '-' .. attempt, 'sale', cashBefore, cashAfter, true)
                 return true, string.format('vente CONFIRMEE : %d/%d -> %d/%d', before.count, before.limit, after.count, after.limit)
             end
             task.wait(0.3)
@@ -877,6 +904,7 @@ end
 local function depositAll(tok)
     if not S.autoBank then return true, 'depot desactive' end
     local cashBefore, cashPath = findMoney()
+    S.hub:observeCash(cashBefore)
     local opened
     for _ = 1, 3 do
         local e = promptByWords(12, { 'atm', 'guichet', 'argent', 'bank', 'banque', 'distrib' })
@@ -909,11 +937,16 @@ local function depositAll(tok)
             VIM:SendMouseMoveEvent(x0, y, game)
             mouseHeld = true
             VIM:SendMouseButtonEvent(x0, y, 0, true, game, 0)
-            for i = 1, 10 do VIM:SendMouseMoveEvent(x0 + (x1 - x0) * i / 10, y, game); task.wait(0.03) end
+            for i = 1, 10 do
+                if not alive(tok) then return end
+                VIM:SendMouseMoveEvent(x0 + (x1 - x0) * i / 10, y, game); task.wait(0.03) end
+            if not alive(tok) then return end
             VIM:SendMouseMoveEvent(x1 + 30, y, game); task.wait(0.05)
+            if not alive(tok) then return end
             VIM:SendMouseButtonEvent(x1, y, 0, false, game, 0)
         end)
-        mouseHeld = false
+        if not alive(tok) then return false, 'annule' end
+        releaseMouse()
     elseif box and cashBefore and cashBefore > 0 then
         pcall(function() box.Text = tostring(cashBefore) end)
     else
@@ -926,6 +959,7 @@ local function depositAll(tok)
     if not sleep(1.5, tok) then return false, 'annule' end
     local cashAfter = findMoney()
     if cashBefore and cashAfter and cashAfter < cashBefore then
+        S.hub:transaction('deposit-' .. tok, 'deposit', cashBefore, cashAfter, true)
         return true, string.format('depot CONFIRME : argent en main %d -> %d', cashBefore, cashAfter)
     end
     pcall(function() local close = buttonByText({ 'fermer', 'close', 'quitter' }); if close then clickGui(close) end end)
@@ -966,71 +1000,94 @@ local function cancelAll(reason)
     local h = humanoid(); local r = getRoot()
     if h and r and not h.SeatPart then pcall(function() h:MoveTo(r.Position) end) end
     S.cycleRunning = false
+    S.recording = false
+    S.hub.farm.running = false
+    S.hub:finishStep(false, reason or 'annule', os.clock())
     if reason then logLine('ANNULATION : ' .. reason) end
 end
 S.cancel = function()
     cancelAll('demande utilisateur (F12)')
     S.autoCycle = false
+    S.paused = true
+    S.fishingEnabled = false
     if S.refreshToggles then S.refreshToggles() end
     setState('ERROR', 'annule par F12 : cycle auto desactive (S.resume() ou bouton pour reprendre)')
 end
 
+function S.performStep(name, timeout, tok, action, verify)
+    if not alive(tok) then return false, 'annule' end
+    if S.hub.current then return false, 'une etape est deja active' end
+    S.hub:beginStep(name, os.clock(), timeout, tok)
+    setState(name, '')
+    local callOK, ok, detail = pcall(action)
+    if not alive(tok) then return false, 'annule' end
+    if os.clock() >= S.hub.current.deadline then ok, detail = false, 'delai maximal depasse' end
+    if not callOK then detail, ok = ok, false end
+    if ok == true and verify then
+        local proofOK, proof = pcall(verify)
+        if not proofOK or proof ~= true then ok, detail = false, 'preuve de fin absente : ' .. tostring(proof) end
+    end
+    S.hub:finishStep(ok == true, detail, os.clock())
+    return ok == true, detail
+end
+
 local function runCycle(manual)
-    if S.cycleRunning then return false, 'cycle deja en cours' end
+    if S.cycleRunning or S.recording then return false, 'cycle ou enregistrement deja en cours' end
     S.token = S.token + 1
     local tok = S.token
     S.cycleRunning = true
     task.spawn(function()
         local function fail(stage, msg)
+            if not alive(tok) then return end
             releaseAll(); releaseMouse()
             S.cycleRunning = false
-            if not alive(tok) then return end
             S.cycleFailures = S.cycleFailures + 1
             S.lastRouteError = stage .. ' : ' .. tostring(msg)
             setState('ERROR', S.lastRouteError)
         end
         local ok, err = pcall(function()
             -- preconditions
+            if S.depositRequired and not S.autoBank then return fail('PRECONDITION', 'depot exige mais ATM desactive') end
             local info = readCapacity(true)
             if not manual and (not info or info.count < info.limit) then return fail('PRECONDITION', 'inventaire pas plein / illisible') end
             if not carValid() then return fail('PRECONDITION', 'aucune voiture memorisee : monte au volant puis bouton "Memoriser voiture"') end
-            local D = S.data
+            local D = Hub.copy(S.data)
             local rodName = fishingTool() and fishingTool().Name
             local hum = humanoid()
             if hum then pcall(function() hum:UnequipTools() end) end
 
             if currentSeat() ~= S.car.seat then
                 setState('TO_CAR', 'marche vers ' .. S.car.name)
-                local okE, why = enterCar(tok)
+                local okE, why = S.performStep('TO_CAR', 80, tok, function() return enterCar(tok) end, function() return currentSeat() == S.car.seat end)
                 if not okE then return fail('ENTREE VOITURE', why) end
             end
             setState('NAVIGATING_TO_VENDOR', '')
-            local okD, why = driveRoute(D.route_to_vendor, 'ALLER', tok)
+            local okD, why = S.performStep('NAVIGATING_TO_VENDOR', 600, tok, function() return driveRoute(D.route_to_vendor, 'ALLER', tok) end)
             if not okD then return fail('CONDUITE ALLER', why) end
             logLine('Aller : ' .. tostring(why))
 
             setState('EXIT_CAR', '')
-            local okX, whyX = exitCar(tok)
+            local okX, whyX = S.performStep('EXIT_CAR', 10, tok, function() return exitCar(tok) end, function() return currentSeat() == nil end)
             if not okX then return fail('SORTIE VOITURE', whyX) end
 
             setState('WALK_TO_VENDOR', '')
-            local okW, whyW = walkTo(v3(D.vendor), 5, tok, 'vendeur')
+            local okW, whyW = S.performStep('WALK_TO_VENDOR', 80, tok, function() return walkTo(v3(D.vendor), 5, tok, 'vendeur') end)
             if not okW then return fail('MARCHE VENDEUR', whyW) end
             setState('SELLING', '')
-            local okS, whyS = sellAll(tok)
+            local okS, whyS = S.performStep('SELLING', 45, tok, function() return sellAll(tok) end)
             S.sellStage = whyS
             if not okS then return fail('VENTE', whyS) end
             logLine(whyS)
             if S.toast then S.toast('Vente reussie : ' .. tostring(whyS):gsub('vente CONFIRMEE : ', ''), 'ok') end
 
             setState('NAVIGATING_TO_ATM', '')
-            local okA, whyA = walkTo(v3(D.atm), 4, tok, 'ATM')
+            local okA, whyA = S.performStep('NAVIGATING_TO_ATM', 80, tok, function() return walkTo(v3(D.atm), 4, tok, 'ATM') end)
             if okA then
                 setState('DEPOSITING', '')
-                local dep, whyDep = depositAll(tok)
+                local dep, whyDep = S.performStep('DEPOSITING', 25, tok, function() return depositAll(tok) end)
                 S.depositStatus = tostring(whyDep)
                 logLine('ATM : ' .. tostring(whyDep))
-                if dep == false and S.depositRequired then return fail('DEPOT', whyDep) end
+                if dep ~= true and S.depositRequired then return fail('DEPOT', whyDep) end
             else
                 S.depositStatus = 'ATM non atteint : ' .. tostring(whyA)
                 logLine(S.depositStatus)
@@ -1039,56 +1096,56 @@ local function runCycle(manual)
             if not alive(tok) then return fail('DEPOT', 'annule') end
 
             setState('BACK_TO_CAR', S.car.name)
-            local okE2, whyE2 = enterCar(tok)
+            local okE2, whyE2 = S.performStep('TO_CAR', 80, tok, function() return enterCar(tok) end, function() return currentSeat() == S.car.seat end)
             if not okE2 then return fail('RETOUR VOITURE', whyE2) end
             setState('RETURNING', '')
-            local okR, whyR = driveRoute(D.route_to_fishing, 'RETOUR', tok)
+            local okR, whyR = S.performStep('RETURNING', 600, tok, function() return driveRoute(D.route_to_fishing, 'RETOUR', tok) end)
             if not okR then return fail('CONDUITE RETOUR', whyR) end
             logLine('Retour : ' .. tostring(whyR))
-            local okX2, whyX2 = exitCar(tok)
+            local okX2, whyX2 = S.performStep('EXIT_CAR', 10, tok, function() return exitCar(tok) end, function() return currentSeat() == nil end)
             if not okX2 then return fail('SORTIE VOITURE (retour)', whyX2) end
 
             setState('RESUMING', 'marche vers le point de peche')
             local fishCF = cfOf(D.fish)
             local pre = fishCF.Position - fishCF.LookVector * 3
-            walkTo(pre, 2.5, tok, 'pre-peche')
-            local okF, whyF = walkTo(fishCF.Position, 2, tok, 'point de peche')
+            local okP, whyP = S.performStep('PRE_FISHING', 80, tok, function() return walkTo(pre, 2.5, tok, 'pre-peche') end)
+            if not okP then return fail('APPROCHE PECHE', whyP) end
+            local okF, whyF = S.performStep('RESUMING', 80, tok, function() return walkTo(fishCF.Position, 2, tok, 'point de peche') end)
             if not okF then return fail('RETOUR PECHE', whyF) end
             if not equipRod(rodName) then logLine('Canne non re-equipee automatiquement : equipe-la') end
-            S.inventoryFull = false; S.sellAttempts = 0; lastCast = -1e6
+            S.checkInventory(); S.sellAttempts = 0; lastCast = -1e6
             S.cycleRunning = false; S.cycleFailures = 0
             setState('FISHING', 'cycle complet termine')
             if S.toast then S.toast('Cycle termine : retour a la peche', 'ok') end
         end)
         if not ok then fail('ERREUR INTERNE', err) end
-        releaseAll(); releaseMouse()
-        S.cycleRunning = false
+        if alive(tok) then releaseAll(); releaseMouse(); S.cycleRunning = false end
     end)
     return true
 end
 S.runCycle = function() return runCycle(true) end
 S.retryCycle = function() S.cycleFailures = 0; S.sellAttempts = 0; return runCycle(false) end
 
-local function testDrive(which)
+local function testDrive(which, namedRoute)
+    if S.recording then return false, 'enregistrement en cours' end
     if S.cycleRunning then return false, 'cycle en cours' end
     if not currentSeat() then setState('ERROR', 'test conduite : monte au volant d\'abord'); return false end
     if not carValid() then rememberCar() end
     S.token = S.token + 1
     local tok = S.token
     S.cycleRunning = true
-    local pts = which == 'retour' and S.data.route_to_fishing or S.data.route_to_vendor
+    local pts = namedRoute or (which == 'retour' and S.data.route_to_fishing or S.data.route_to_vendor)
     setState(which == 'retour' and 'TEST_RETOUR' or 'TEST_ALLER', 'depart dans 3 s (F12 annule)')
     task.spawn(function()
         if sleep(3, tok) then
-            local ok, why = driveRoute(pts, 'TEST ' .. which:upper(), tok)
+            local ok, why = S.performStep(which == 'retour' and 'TEST_RETOUR' or 'TEST_ALLER', 600, tok, function() return driveRoute(pts, 'TEST ' .. which:upper(), tok) end)
             if alive(tok) then
                 local d = S.driver
                 local extra = d and string.format(' | ecart max %.1f studs, demi-tours %d, degagements %d', d.maxCross or 0, d.uturns or 0, d.recoveries or 0) or ''
                 setState(ok and 'IDLE' or 'ERROR', 'test ' .. which .. ' : ' .. tostring(why) .. extra)
             end
         end
-        releaseAll()
-        if alive(tok) then S.cycleRunning = false end
+        if alive(tok) then releaseAll(); S.cycleRunning = false end
     end)
     return true
 end
@@ -1131,6 +1188,170 @@ function S.nextSpeedPreset()
 end
 
 ---------------------------------------------------------------------------
+S.views = {}
+-- Services V1 : bibliotheque explicite, session, destinations et agriculture.
+do
+local libraryFile = 'blockspin-library-v1.json'
+local libraryWritable = true
+local function idle()
+    return S.running and not S.cycleRunning and not S.hub.current and not S.recording
+end
+function S.saveLibrary()
+    if not libraryWritable then return false, 'fichier illisible preserve : corriger puis recharger explicitement' end
+    if type(writefile) ~= 'function' then return false, 'writefile indisponible' end
+    local ok, err = pcall(function()
+        local checker = Hub.new(0)
+        assert(checker:loadLibrary(S.hub.library))
+        local raw = HttpService:JSONEncode(S.hub.library)
+        assert(#raw <= 2097152, 'bibliotheque trop grande')
+        writefile(libraryFile, raw)
+    end)
+    if not ok then S.hub:error('Bibliotheque', err, os.clock()) end
+    return ok, ok and 'Bibliotheque sauvegardee' or tostring(err)
+end
+function S.loadLibrary()
+    if not idle() then return false, 'arreter les activites avant de recharger' end
+    if type(readfile) ~= 'function' or type(isfile) ~= 'function' or not isfile(libraryFile) then return false, 'bibliotheque absente' end
+    local ok, err = pcall(function()
+        local raw = readfile(libraryFile)
+        assert(type(raw) == 'string' and #raw <= 2097152, 'bibliotheque trop grande')
+        local valid, why = S.hub:loadLibrary(HttpService:JSONDecode(raw)); assert(valid, why)
+    end)
+    libraryWritable = ok
+    if not ok then S.hub:error('Bibliotheque', err, os.clock()) end
+    return ok, ok and 'Bibliotheque chargee' or tostring(err)
+end
+function S.spotEvent(kind)
+    local spot = S.hub.activeSpot and S.hub.library.spots[S.hub.activeSpot]
+    local root = getRoot()
+    if spot and root and (root.Position - v3(spot.cf)).Magnitude <= 8 then S.hub:spotEvent(kind) end
+end
+function S.saveSpot(name)
+    if not idle() then return false, 'activite en cours' end
+    local root = getRoot()
+    if not root then return false, 'personnage indisponible' end
+    local aim = S.baitScreenPoint
+    return S.hub:addSpot(name, { root.CFrame:GetComponents() }, aim and { x = aim.X, y = aim.Y })
+end
+function S.selectSpot(name)
+    if not idle() then return false, 'activite en cours' end
+    local spot = S.hub.library.spots[name]
+    if not spot then return false, 'spot introuvable' end
+    local root = getRoot()
+    if not root or (root.Position - v3(spot.cf)).Magnitude > 8 then return false, 'rejoindre le spot a moins de 8 studs avant de le selectionner' end
+    S.data.fish = Hub.copy(spot.cf)
+    S.baitScreenPoint = spot.aim and Vector2.new(spot.aim.x, spot.aim.y) or nil
+    S.hub.activeSpot = name
+    return true, 'Spot selectionne : ' .. name
+end
+function S.saveNamedRoute(name)
+    if not idle() then return false, 'terminer l\'enregistrement et les activites avant de conserver le trajet' end
+    return S.hub:addRoute(name, S.recordBuffer)
+end
+function S.driveNamedRoute(name)
+    if not idle() then return false, 'activite en cours' end
+    local route = S.hub.library.routes[name]
+    if not route then return false, 'destination introuvable' end
+    return testDrive('destination ' .. name, Hub.copy(route))
+end
+function S.removeLibraryItem(kind, name)
+    if not idle() then return false, 'activite en cours' end
+    local list = (kind == 'spot' and S.hub.library.spots) or (kind == 'route' and S.hub.library.routes)
+    if not list or not list[name] then return false, 'element introuvable' end
+    list[name] = nil
+    if kind == 'spot' then
+        S.hub.spotStats[name] = nil
+        if S.hub.activeSpot == name then S.hub.activeSpot = nil end
+    end
+    return true, 'Suppression en memoire ; sauvegarder explicitement pour conserver'
+end
+function S.refreshMoney()
+    local value, path = findMoney()
+    if not S.hub:observeCash(value) then return false, 'solde inconnu : aucune estimation inventee' end
+    return true, 'Solde observe : ' .. value .. ' (' .. tostring(path) .. ')'
+end
+function S.setFarmingAdapter(adapter)
+    if not idle() then return false, 'activite en cours' end
+    return S.hub:setFarmAdapter(adapter)
+end
+function S.startFarm(plan, replant)
+    if not idle() then return false, 'activite en cours' end
+    if not S.hub.farm.available then return false, 'Culture indisponible : interactions du jeu non observees. Utiliser Diagnostic ecran.' end
+    if type(plan) ~= 'table' or #plan < 1 or #plan > 20 then return false, '1 a 20 parcelles requises' end
+    local unique = {}
+    for _, row in ipairs(plan) do
+        if type(row) ~= 'table' or type(row.plot) ~= 'string' or type(row.crop) ~= 'string'
+            or #row.plot == 0 or #row.plot > 64 or #row.crop == 0 or #row.crop > 64
+            or row.plot:find('%c') or row.crop:find('%c') or unique[row.plot] then return false, 'parcelle/culture invalide ou dupliquee' end
+        unique[row.plot] = true
+    end
+    plan = Hub.copy(plan)
+    S.token = S.token + 1; local tok = S.token
+    S.hub.farm.running = true; S.cycleRunning = true; S.fishingEnabled = false; S.paused = false
+    task.spawn(function()
+        local farm = S.hub.farm
+        local function step(row, kind)
+            local a = farm.adapter
+            return S.performStep('FARM_' .. kind:upper(), 20, tok, function()
+                if a[kind](row.plot, row.crop) ~= true then return false, 'action agricole refusee' end
+                local deadline = os.clock() + 18
+                while alive(tok) and os.clock() < deadline do
+                    local seen = a.observe(row.plot)
+                    if type(seen) == 'table' and ((kind == 'plant' and seen.state == 'growing' and seen.crop == row.crop)
+                        or (kind == 'harvest' and seen.state == 'empty')) then return true, 'observation confirmee' end
+                    if not sleep(0.25, tok) then break end
+                end
+                return false, 'resultat agricole non confirme'
+            end)
+        end
+        local ok, why = pcall(function()
+            repeat
+                for _, row in ipairs(plan) do
+                    if not alive(tok) then return end
+                    local action, err = S.hub:farmAction(row.plot, row.crop, replant)
+                    if not action then error(err) end
+                    if action.kind == 'wait' then
+                        local ready, detail = S.performStep('FARM_GROWING', 600, tok, function()
+                            local untilAt = os.clock() + 598
+                            while alive(tok) and os.clock() < untilAt do
+                                local seen = farm.adapter.observe(row.plot)
+                                if type(seen) ~= 'table' or seen.crop ~= row.crop then return false, 'observation de culture perdue' end
+                                if seen.state == 'ready' then return true end
+                                if seen.state ~= 'growing' then return false, 'etat agricole inattendu' end
+                                if not sleep(1, tok) then break end
+                            end
+                            return false, 'delai de croissance depasse'
+                        end)
+                        if not ready then error(detail) end
+                        action = { kind = 'harvest' }
+                    end
+                    local done, detail = step(row, action.kind)
+                    if not done then error(detail) end
+                    if not alive(tok) then return end
+                    if action.kind == 'plant' then farm.planted = farm.planted + 1
+                    else
+                        farm.harvested = farm.harvested + 1
+                        if replant then
+                            local planted, msg = step(row, 'plant'); if not planted then error(msg) end
+                            farm.planted = farm.planted + 1
+                        end
+                    end
+                end
+                farm.cycles = farm.cycles + 1
+                if replant and not sleep(1, tok) then return end
+            until not replant or not alive(tok)
+        end)
+        if alive(tok) then
+            farm.running = false; S.cycleRunning = false
+            if not ok then S.hub:finishStep(false, why, os.clock()); setState('ERROR', tostring(why))
+            else setState('IDLE', 'Passage agricole termine (observations de l\'adaptateur)') end
+        end
+    end)
+    return true, 'Culture demarree avec adaptateur local'
+end
+S.loadLibrary()
+end
+
 -- 16. DIAGNOSTIC GUI / PROMPTS / VEHICULE (bouton Settings > Diagnostic)
 ---------------------------------------------------------------------------
 local dumpCount = 0
@@ -1166,16 +1387,16 @@ function S.dumpGui()
 end
 
 ---------------------------------------------------------------------------
--- 17. INTERFACE SIMPLIFIEE (theme du hub 0.4.0)
--- 3 onglets : Accueil (l'essentiel), Index (poissons/plantes), Reglages.
+-- 17. BLACK EDITION UI
+-- Six onglets : Fishing, Vehicle, Money, Farming, Statistics, Settings.
 -- Les outils techniques sont dans Reglages > Avance (replie par defaut).
 -- Clavier : touche d'affichage (RightShift par defaut) et F12 (urgence) seulement.
 ---------------------------------------------------------------------------
 local SETTINGS_FILE = 'blockspin-settings-v1.json'
-local ui = { accent = 'C5F277', hotkey = 'RightShift', scale = 1, metrics = true, overlay = false, hideInMinigame = true,
-    speedPreset = 'Rapide', rareAction = 'none', rarePurple = true, toasts = true }
-local PREF_KEYS = { 'accent', 'hotkey', 'scale', 'metrics', 'overlay', 'hideInMinigame', 'speedPreset', 'rareAction', 'rarePurple', 'toasts',
-    'position', 'size', 'overlayPosition' }
+local ui = { accent = 'FF475C', hotkey = 'RightShift', scale = 1, metrics = true, overlay = false, hideInMinigame = true,
+    speedPreset = 'Rapide', rareAction = 'none', rarePurple = true, toasts = true, animations = true, layoutVersion = 2 }
+local PREF_KEYS = { 'accent', 'hotkey', 'scale', 'metrics', 'overlay', 'hideInMinigame', 'speedPreset', 'rareAction', 'rarePurple', 'toasts', 'animations',
+    'position', 'size', 'overlayPosition', 'layoutVersion' }
 local RARE_ACTIONS = { none = 'ne rien faire', leave = 'quitter le serveur', sell = 'aller vendre' }
 local settingsRaw -- fichier lu en entier : profils et champs du hub 0.4.0 conserves
 local function validKeyName(n)
@@ -1187,7 +1408,7 @@ local function readPrefs(d, into)
     if type(d.accent) == 'string' and d.accent:match('^%x%x%x%x%x%x$') then into.accent = d.accent end
     if validKeyName(d.hotkey) then into.hotkey = d.hotkey end
     if isNum(d.scale) and d.scale >= 0.75 and d.scale <= 1.5 then into.scale = d.scale end
-    for _, k in ipairs({ 'metrics', 'overlay', 'hideInMinigame', 'rarePurple', 'toasts' }) do if type(d[k]) == 'boolean' then into[k] = d[k] end end
+    for _, k in ipairs({ 'metrics', 'overlay', 'hideInMinigame', 'rarePurple', 'toasts', 'animations' }) do if type(d[k]) == 'boolean' then into[k] = d[k] end end
     for _, p in ipairs(SPEED_PRESETS) do if d.speedPreset == p.name then into.speedPreset = p.name end end
     if RARE_ACTIONS[d.rareAction] then into.rareAction = d.rareAction end
     for _, f in ipairs({ 'position', 'size', 'overlayPosition' }) do
@@ -1228,10 +1449,10 @@ end
 S.setSpeedPreset(ui.speedPreset)
 
 local theme = {
-    background = Color3.fromRGB(14, 16, 18), surface = Color3.fromRGB(23, 26, 29),
-    control = Color3.fromRGB(31, 35, 39), border = Color3.fromRGB(47, 53, 59),
-    text = Color3.fromRGB(241, 244, 239), muted = Color3.fromRGB(166, 175, 181),
-    danger = Color3.fromRGB(150, 40, 40),
+    background = Color3.fromRGB(9, 10, 13), surface = Color3.fromRGB(15, 16, 20),
+    control = Color3.fromRGB(22, 23, 29), border = Color3.fromRGB(34, 36, 44),
+    text = Color3.fromRGB(238, 239, 245), muted = Color3.fromRGB(130, 135, 152),
+    danger = Color3.fromRGB(175, 42, 61),
 }
 local function hexColor(h) return Color3.fromRGB(tonumber(h:sub(1, 2), 16), tonumber(h:sub(3, 4), 16), tonumber(h:sub(5, 6), 16)) end
 theme.accent = hexColor(ui.accent)
@@ -1244,7 +1465,7 @@ end
 local function connect(signal, fn)
     local c = signal:Connect(function(...)
         local ok, err = pcall(fn, ...)
-        if not ok then logLine('Erreur interface : ' .. tostring(err)) end
+        if not ok then logLine('Erreur interface : ' .. tostring(err)); S.hub:error('Interface', err, os.clock()) end
     end)
     table.insert(conns, c)
     return c
@@ -1261,14 +1482,15 @@ end
 
 gui = make('ScreenGui', { Name = 'BlockSpinCycle080', ResetOnSpawn = false, IgnoreGuiInset = true,
     ZIndexBehavior = Enum.ZIndexBehavior.Sibling }, pg)
-local window = make('Frame', { Name = 'Window', BackgroundColor3 = theme.background, BorderSizePixel = 0,
-    ClipsDescendants = true, Active = true }, gui)
+local window = make('CanvasGroup', { Name = 'Window', BackgroundColor3 = theme.background, BorderSizePixel = 0,
+    ClipsDescendants = true, Active = true, GroupTransparency = 0 }, gui)
 local menuScale = make('UIScale', { Scale = ui.scale }, window)
-round(window, 12); outline(window)
+round(window, 14); outline(window)
+
+--@@INTERFACE@@
 
 -- ANNONCES : bulles "verre" en haut au centre (au plus 3, disparaissent apres 4 s)
 do -- annonces (portee fermee : limite de 200 locales)
-local TweenService = game:GetService('TweenService')
 local toastHolder = make('Frame', { Name = 'Toasts', BackgroundTransparency = 1, AnchorPoint = Vector2.new(0.5, 0),
     Position = UDim2.new(0.5, 0, 0, 14), Size = UDim2.fromOffset(400, 200), ZIndex = 20 }, gui)
 make('UIListLayout', { Padding = UDim.new(0, 8), HorizontalAlignment = Enum.HorizontalAlignment.Center,
@@ -1276,10 +1498,7 @@ make('UIListLayout', { Padding = UDim.new(0, 8), HorizontalAlignment = Enum.Hori
 local TOAST_COLORS = { ok = Color3.fromRGB(110, 230, 150), warn = Color3.fromRGB(255, 196, 90),
     error = Color3.fromRGB(255, 110, 110), rare = Color3.fromRGB(190, 120, 255), info = Color3.fromRGB(120, 200, 255) }
 local toastSeq, lastToastText, lastToastAt = 0, nil, -100
-local function tween(o, time, props)
-    local ok = pcall(function() TweenService:Create(o, TweenInfo.new(time, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props):Play() end)
-    if not ok then for k, v in pairs(props) do pcall(function() o[k] = v end) end end
-end
+local tween = S.animate
 function S.toast(text, kind)
     if not ui.toasts or not toastHolder.Parent then return end
     text = tostring(text)
@@ -1291,7 +1510,7 @@ function S.toast(text, kind)
     table.sort(cards, function(a, b) return a.LayoutOrder < b.LayoutOrder end)
     while #cards >= 3 do table.remove(cards, 1):Destroy() end
     local card = make('Frame', { Name = 'Toast', LayoutOrder = toastSeq, Size = UDim2.fromOffset(380, 44),
-        BackgroundColor3 = Color3.fromRGB(18, 20, 26), BackgroundTransparency = 1, BorderSizePixel = 0, ZIndex = 20 }, toastHolder)
+        BackgroundColor3 = Color3.fromRGB(10, 10, 10), BackgroundTransparency = 1, BorderSizePixel = 0, ZIndex = 20 }, toastHolder)
     round(card, 22)
     make('UIGradient', { Rotation = 90, Color = ColorSequence.new(Color3.fromRGB(255, 255, 255), Color3.fromRGB(170, 180, 200)) }, card)
     local stroke = make('UIStroke', { Color = Color3.fromRGB(255, 255, 255), Thickness = 1, Transparency = 1 }, card)
@@ -1319,39 +1538,48 @@ end
 local function fitWindow()
     local v, sc = viewportSize(), ui.scale
     local maxW, maxH = math.max(1, v.X / sc), math.max(1, v.Y / sc)
-    local w = clamp(window.Size.X.Offset, math.min(380, maxW), maxW)
-    local h = clamp(window.Size.Y.Offset, math.min(360, maxH), maxH)
+    local w = clamp(window.Size.X.Offset, math.min(420, maxW), maxW)
+    local h = clamp(window.Size.Y.Offset, math.min(400, maxH), maxH)
     window.Size = UDim2.fromOffset(w, h)
     window.Position = UDim2.fromOffset(clamp(window.Position.X.Offset, 0, math.max(0, v.X - w * sc)),
         clamp(window.Position.Y.Offset, 0, math.max(0, v.Y - h * sc)))
+    S.design.layout()
 end
-local size0 = ui.size or { x = 430, y = 500 }
-local pos0 = ui.position or { x = 16, y = 90 }
+-- L'ancienne taille par defaut est migree ; les tailles personnalisees restent intactes.
+if ui.size and ui.size.x == 430 and ui.size.y == 500 and not (settingsRaw and settingsRaw.layoutVersion == 2) then ui.size = nil; ui.position = nil end
+local size0 = ui.size or { x = 960, y = 640 }
+local pos0 = ui.position or { x = math.max(0,(viewportSize().X-size0.x*ui.scale)/2), y = math.max(0,(viewportSize().Y-size0.y*ui.scale)/2) }
 window.Size = UDim2.fromOffset(size0.x, size0.y)
 window.Position = UDim2.fromOffset(pos0.x, pos0.y)
 
 local accentItems = {}
 local function label(parent, text, height)
-    return make('TextLabel', { Size = UDim2.new(1, 0, 0, height or 32), BackgroundTransparency = 1, Text = text,
+    parent = S.design.parent(parent)
+    return make('TextLabel', { Size = UDim2.new(1, 0, 0, height or 32), BackgroundTransparency = 1, Text = text, LayoutOrder = S.design.order(parent),
         TextWrapped = true, TextColor3 = theme.muted, TextSize = 13, Font = Enum.Font.Gotham,
         TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Center }, parent)
 end
 local function button(parent, text, fn, height)
-    local b = make('TextButton', { Size = UDim2.new(1, 0, 0, height or 40), BackgroundColor3 = theme.control, BorderSizePixel = 0,
-        Text = text, TextColor3 = theme.text, TextSize = 14, Font = Enum.Font.GothamMedium, TextWrapped = true,
+    parent = S.design.parent(parent)
+    local b = make('TextButton', { Size = UDim2.new(1, 0, 0, height or 44), LayoutOrder = S.design.order(parent), BackgroundColor3 = theme.control, BorderSizePixel = 0,
+        Text = text, TextColor3 = theme.text, TextSize = 12, Font = Enum.Font.GothamMedium, TextWrapped = true,
         AutoButtonColor = true, TextXAlignment = Enum.TextXAlignment.Left }, parent)
-    round(b, 8); outline(b); inset(b, 14)
+    round(b, 7); outline(b); inset(b, 12)
+    S.design.hover(b, b:FindFirstChildOfClass('UIStroke'))
     connect(b.Activated, function() fn(b) end)
     return b
 end
 local function textbox(parent, placeholder)
-    local t = make('TextBox', { Size = UDim2.new(1, 0, 0, 36), BackgroundColor3 = theme.background, BorderSizePixel = 0,
+    parent = S.design.parent(parent)
+    local t = make('TextBox', { Size = UDim2.new(1, 0, 0, 40), LayoutOrder = S.design.order(parent), BackgroundColor3 = theme.background, BorderSizePixel = 0,
         Text = '', PlaceholderText = placeholder, ClearTextOnFocus = false, PlaceholderColor3 = theme.muted,
         TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = theme.text, TextSize = 13, Font = Enum.Font.Gotham }, parent)
     round(t, 7); outline(t); inset(t, 14)
     return t
 end
 local function section(parent, text)
+    local heading = S.design.section(parent, text)
+    if heading then return heading end
     local h = label(parent, text, 24)
     h.TextSize, h.TextColor3, h.Font = 11, theme.accent, Enum.Font.GothamBold
     table.insert(accentItems, h)
@@ -1360,20 +1588,24 @@ end
 local function notice(parent, text, height)
     local n = label(parent, text, height or 52)
     n.BackgroundTransparency, n.BackgroundColor3, n.TextColor3 = 0, theme.surface, theme.muted
-    n.TextYAlignment = Enum.TextYAlignment.Top
-    round(n, 8); outline(n); inset(n, 12)
+    n.TextYAlignment = Enum.TextYAlignment.Center
+    n.BackgroundColor3 = theme.control
+    round(n, 7); inset(n, 12)
     return n
 end
 local toggles = {}
 local function toggle(parent, textFn, fn, height)
-    local b = button(parent, textFn(), function(b) fn(); b.Text = textFn() end, height)
-    table.insert(toggles, function() local t = textFn(); if b.Text ~= t then b.Text = t end end)
+    local row
+    local b = button(parent, textFn(), function(b) fn(); row.paint(textFn()); S.design.layout() end, height or 50)
+    row = S.design.decorateRow(b, textFn())
+    table.insert(toggles, function() local t = textFn(); if b.Text ~= t then row.paint(t) end end)
     return b
 end
 function S.refreshToggles() for _, f in ipairs(toggles) do pcall(f) end end
 local function grid(parent, items, h)
-    h = h or 38
-    local holder = make('Frame', { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, math.ceil(#items / 2) * (h + 6)) }, parent)
+    parent = S.design.parent(parent)
+    h = h or 44
+    local holder = make('Frame', { BackgroundTransparency = 1, LayoutOrder = S.design.order(parent), Size = UDim2.new(1, 0, 0, math.ceil(#items / 2) * (h + 6)) }, parent)
     for i, it in ipairs(items) do
         local b = button(holder, it[1], it[2], h)
         b.Size = UDim2.new(0.5, -4, 0, h)
@@ -1382,63 +1614,40 @@ local function grid(parent, items, h)
     return holder
 end
 
--- en-tete : titre (sert a deplacer) + FPS
-local top = make('Frame', { Size = UDim2.new(1, 0, 0, 50), BackgroundColor3 = theme.surface, BorderSizePixel = 0, Active = true }, window)
-local title = label(top, 'BLOCKSPIN', 26)
-title.Position = UDim2.fromOffset(16, 4); title.Size = UDim2.new(1, -170, 0, 26)
-title.TextSize, title.Font, title.TextColor3 = 18, Enum.Font.GothamBold, theme.text
-local sub = label(top, 'v' .. VERSION .. '  /  ' .. ui.hotkey .. ' : masquer', 14)
-sub.Position = UDim2.fromOffset(16, 30); sub.Size = UDim2.new(1, -170, 0, 14); sub.TextSize = 10
-local metrics = label(top, 'FPS --', 24)
-metrics.Size = UDim2.fromOffset(140, 24); metrics.Position = UDim2.new(1, -152, 0, 13)
-metrics.TextSize, metrics.TextColor3, metrics.TextXAlignment = 11, theme.muted, Enum.TextXAlignment.Right
-metrics.Visible = ui.metrics
--- onglets en haut (3 seulement)
-local tabBar = make('Frame', { Position = UDim2.fromOffset(10, 56), Size = UDim2.new(1, -20, 0, 34), BackgroundTransparency = 1 }, window)
--- pied : etat du script
-local footer = make('Frame', { Size = UDim2.new(1, 0, 0, 40), Position = UDim2.new(0, 0, 1, -40),
-    BackgroundColor3 = theme.surface, BorderSizePixel = 0 }, window)
-stateLabel = label(footer, 'demarrage', 38)
-stateLabel.Position = UDim2.fromOffset(14, 1); stateLabel.Size = UDim2.new(1, -50, 0, 38)
-stateLabel.TextSize, stateLabel.TextColor3, stateLabel.Font = 12, theme.accent, Enum.Font.Code
-table.insert(accentItems, stateLabel)
-local resize = make('TextButton', { Text = '<>', TextSize = 13, TextColor3 = theme.text, BackgroundColor3 = theme.control,
-    Size = UDim2.fromOffset(24, 24), Position = UDim2.new(1, -30, 1, -32), ZIndex = 5 }, window)
+-- Barre laterale, profil Roblox et en-tete editorial.
+S.design.createChrome()
+local top = S.design.dragHandle
+local title = S.design.brandTitle
+local sub = S.design.versionLabel
+local metrics = S.design.metrics
+local tabBar = S.design.nav
+local footer = S.design.footer
+stateLabel = S.design.stateLabel
+local resize = S.design.resize
 
 local pages, tabButtons, pageOrder = {}, {}, {}
-local activePage = 'Accueil'
+local activePage = 'Fishing'
 local function updateTabs()
-    for name, b in pairs(tabButtons) do
-        local sel = name == activePage
-        b.BackgroundColor3 = sel and theme.accent or theme.control
-        b.TextColor3 = sel and theme.background or theme.text
-        pages[name].Visible = sel
-    end
+    S.design.navigation(pages, activePage)
 end
-local TAB_NAMES = { 'Accueil', 'Index', 'Reglages' }
 local function page(name)
     local body = make('ScrollingFrame', { Name = name, BackgroundTransparency = 1, BorderSizePixel = 0,
-        Position = UDim2.fromOffset(12, 98), Size = UDim2.new(1, -24, 1, -146), CanvasSize = UDim2.new(),
-        AutomaticCanvasSize = Enum.AutomaticSize.Y, ScrollBarThickness = 3, ScrollBarImageColor3 = theme.border, Visible = false }, window)
-    make('UIListLayout', { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }, body)
-    make('UIPadding', { PaddingRight = UDim.new(0, 6), PaddingBottom = UDim.new(0, 12) }, body)
+        Position = UDim2.fromOffset(0, 0), Size = UDim2.fromScale(1, 1), CanvasSize = UDim2.new(),
+        AutomaticCanvasSize = Enum.AutomaticSize.Y, ScrollBarThickness = 3, ScrollBarImageColor3 = theme.border, Visible = false }, S.design.content)
+    make('UIListLayout', { Padding = UDim.new(0, 16), SortOrder = Enum.SortOrder.LayoutOrder }, body)
+    make('UIPadding', { PaddingRight = UDim.new(0, 6), PaddingBottom = UDim.new(0, 16) }, body)
     pages[name] = body
     pageOrder[#pageOrder + 1] = name
-    local i = #pageOrder
-    local tb = make('TextButton', { Size = UDim2.new(1 / #TAB_NAMES, -4, 1, 0), Position = UDim2.new((i - 1) / #TAB_NAMES, 2, 0, 0),
-        BackgroundColor3 = theme.control, BorderSizePixel = 0, Text = name, TextColor3 = theme.text, TextSize = 13,
-        Font = Enum.Font.GothamBold }, tabBar)
-    round(tb, 8)
-    connect(tb.Activated, function() activePage = name; updateTabs() end)
-    tabButtons[name] = tb
+    S.design.addPage(body, name)
+    tabButtons[name] = S.design.navButton(name, function() activePage = name; updateTabs() end)
     return body
 end
 
 ---------------------------------------------------------------------------
 -- ACCUEIL
 ---------------------------------------------------------------------------
-local home = page('Accueil')
-infoLabel = notice(home, '', 58)
+local home = page('Fishing')
+infoLabel = notice(home, '', 76)
 toggle(home, function() return (S.fishingEnabled and '[ON]  ' or '[OFF] ') .. 'Peche automatique' end,
     function() S.fishingEnabled = not S.fishingEnabled end, 44)
 toggle(home, function() return (S.autoCycle and '[ON]  ' or '[OFF] ') .. 'Vente auto quand l\'inventaire est plein' end,
@@ -1459,6 +1668,91 @@ logLabel = notice(home, '', 128)
 logLabel.TextSize = 11; logLabel.Font = Enum.Font.Code
 
 ---------------------------------------------------------------------------
+-- BLACK EDITION : gestion des spots, vehicules, argent et culture.
+do
+local function result(ok, message)
+    local text = message or (ok and 'Operation terminee en memoire' or 'Operation refusee')
+    logLine(text); if S.toast then S.toast(text, ok and 'ok' or 'warn') end
+end
+section(home, 'SPOTS DE PECHE')
+notice(home, 'Enregistre la position et l\'orientation du personnage, avec la visee ecran si definie. Aucune position d\'hamecon deduite.', 64)
+local spotName = textbox(home, 'Nom du spot')
+grid(home, {
+    { 'Enregistrer ce spot', function() result(S.saveSpot(spotName.Text)) end },
+    { 'Selectionner le spot', function() result(S.selectSpot(spotName.Text)) end },
+    { 'Supprimer ce spot', function() result(S.removeLibraryItem('spot', spotName.Text)) end },
+    { 'Sauvegarder la bibliotheque', function() result(S.saveLibrary()) end },
+})
+button(home, 'Capturer la visee dans 3 secondes', function()
+    local tok = S.token
+    S.toast('Place la souris sur l\'eau : capture dans 3 s', 'info')
+    task.delay(3, function()
+        if not alive(tok) then return end
+        local m = UIS:GetMouseLocation(); S.baitScreenPoint = Vector2.new(m.X, m.Y)
+        result(true, 'Visee capturee ; enregistrer un nouveau spot pour la conserver')
+    end)
+end)
+button(home, 'Reprendre la peche apres STOP', function()
+    result(S.resume(), S.inventoryFull and 'Inventaire plein : liberer avant de reprendre' or 'Reprise demandee')
+end)
+S.views.spots = notice(home, '', 80)
+
+local vehicle = page('Vehicle')
+section(vehicle, 'AUTO DRIVE V2')
+notice(vehicle, 'Conduite native W/A/S/D. Vitesse cible en studs/s, non calibree. Stationnement = freinage au dernier point ; orientation finale non geree.', 70)
+S.views.routes = notice(vehicle, '', 70)
+grid(vehicle, {
+    { 'Memoriser voiture actuelle', function() result(rememberCar()) end },
+    { 'Tester ALLER', function() result(testDrive('aller')) end },
+    { 'Tester RETOUR', function() result(testDrive('retour')) end },
+    { 'Recharger la bibliotheque', function() result(S.loadLibrary()) end },
+})
+toggle(vehicle, function() return 'Vitesse voiture : ' .. S.speedPreset end,
+    function() S.nextSpeedPreset(); ui.speedPreset = S.speedPreset; saveSettings() end)
+toggle(vehicle, function() return S.recording and ('Enregistrement : ' .. #S.recordBuffer .. ' points (arreter)') or 'Enregistrer un nouveau trajet' end,
+    function()
+        if S.cycleRunning then result(false, 'Activite en cours'); return end
+        S.recording = not S.recording
+        if S.recording then S.recordBuffer = {} end
+    end)
+local routeName = textbox(vehicle, 'Nom de destination')
+grid(vehicle, {
+    { 'Conserver le trajet nomme', function() result(S.saveNamedRoute(routeName.Text)) end },
+    { 'Conduire vers destination', function() result(S.driveNamedRoute(routeName.Text)) end },
+    { 'Supprimer destination', function() result(S.removeLibraryItem('route', routeName.Text)) end },
+    { 'Sauvegarder la bibliotheque', function() result(S.saveLibrary()) end },
+})
+
+local money = page('Money')
+section(money, 'MONEY MANAGER / SESSION')
+S.views.money = notice(money, '', 144)
+notice(money, 'Gains = hausse du solde observee pendant une vente avec baisse d\'inventaire. Depot = baisse du solde apres confirmation ATM (heuristique). Montants inconnus exclus. Taux horaire apres 60 s.', 100)
+button(money, 'Actualiser le solde observe', function() result(S.refreshMoney()) end)
+button(money, 'Lancer le cycle vente / ATM / retour', function() result(S.runCycle()) end)
+toggle(money, function() return 'Depot ATM : ' .. (S.autoBank and 'actif' or 'inactif') end,
+    function() if not S.cycleRunning then S.autoBank = not S.autoBank end end)
+toggle(money, function() return 'Exiger une preuve de depot : ' .. (S.depositRequired and 'oui' or 'non') end,
+    function() if not S.cycleRunning then S.depositRequired = not S.depositRequired end end)
+
+local farming = page('Farming')
+section(farming, 'AUTO FARM / ADAPTATEUR REQUIS')
+notice(farming, 'Integration BlockSpin indisponible : plantation et recolte reelles non observees. Le moteur peut etre teste avec un adaptateur local. Diagnostic requis avant une integration au jeu.', 90)
+S.views.farm = notice(farming, '', 70)
+local planBox = textbox(farming, 'Parcelles : A:Corn, B:Pumpkin')
+local replant = true
+toggle(farming, function() return 'Replantation : ' .. (replant and 'oui' or 'non') end, function() replant = not replant end)
+button(farming, 'Demarrer la culture (adaptateur requis)', function()
+    local plan = {}
+    for entry in planBox.Text:gmatch('[^,]+') do
+        local plot, crop = entry:match('^%s*([^:]+):%s*(.-)%s*$')
+        if not plot or crop == '' then result(false, 'Format : parcelle:plante, parcelle:plante'); return end
+        plan[#plan + 1] = { plot = plot:match('^%s*(.-)%s*$'), crop = crop }
+    end
+    result(S.startFarm(plan, replant))
+end)
+button(farming, 'Diagnostic ecran pour la culture', function() S.dumpGui() end)
+end
+
 -- INDEX : poissons et plantes
 ---------------------------------------------------------------------------
 -- Sources web consultees le 2026-11-05 (sites de fans, NON verifiees en jeu) :
@@ -1486,7 +1780,14 @@ local PLANTS_WEB = {
     { 'Mais (Corn)', 'graine ~250 selon une video, non verifie' },
     { 'Citrouille (Pumpkin)', 'gains annonces par des joueurs, non verifies' },
 }
-local index = page('Index')
+local index = page('Statistics')
+section(index, 'AFK DASHBOARD / SESSION')
+S.views.dashboard = notice(index, '', 110)
+section(index, 'STATISTIQUES PAR SPOT (SESSION)')
+S.views.spotStats = notice(index, '', 70)
+section(index, 'JOURNAL DES ERREURS (80 MAXIMUM)')
+S.views.errors = notice(index, '', 160)
+logLabel.Parent = S.design.parent(index)
 section(index, 'POISSONS (liste web, non verifiee en jeu)')
 local lines = {}
 for _, f in ipairs(FISH_WEB) do lines[#lines + 1] = string.format('%s  |  %s  |  %s', f[1], f[2], f[3]) end
@@ -1512,15 +1813,26 @@ end
 ---------------------------------------------------------------------------
 -- REGLAGES
 ---------------------------------------------------------------------------
-local settingsPage = page('Reglages')
-section(settingsPage, 'COULEUR')
-local PALETTE = { 'C5F277', '5EC8FF', 'B07CFF', 'FF6FA8', 'FF9F43', 'FFD84D', '4DE0A0', 'F1F4EF' }
+local settingsPage = page('Settings')
+section(settingsPage, 'BLACK EDITION / COULEUR')
+local PALETTE = { 'FF475C', 'C5F277', '5EC8FF', 'B07CFF', 'FF6FA8', 'FF9F43', 'FFD84D', '4DE0A0', 'F1F4EF' }
 local function applyAccent(hex)
     theme.accent = hexColor(hex)
     for _, it in ipairs(accentItems) do it.TextColor3 = theme.accent end
+    S.design.applyAccent()
     updateTabs()
 end
-local swatches = make('Frame', { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 34) }, settingsPage)
+do
+local customAccent = textbox(settingsPage, 'Accent #RRGGBB')
+button(settingsPage, 'Appliquer mon accent', function()
+    local h = customAccent.Text:gsub('^#', ''):upper()
+    if not h:match('^%x%x%x%x%x%x$') then logLine('Accent invalide : #RRGGBB requis'); return end
+    ui.accent = h; applyAccent(h); saveSettings()
+end)
+toggle(settingsPage, function() return 'Animations : ' .. (ui.animations and 'oui' or 'non') end,
+    function() ui.animations = not ui.animations; if not ui.animations then S.design.finishAnimations() end; saveSettings() end)
+end
+local swatches = make('Frame', { BackgroundTransparency = 1, LayoutOrder = S.design.order(S.design.parent(settingsPage)), Size = UDim2.new(1, 0, 0, 34) }, S.design.parent(settingsPage))
 for i, hex in ipairs(PALETTE) do
     local h = hex
     local sw = make('TextButton', { Name = 'Couleur' .. h, Text = '', BackgroundColor3 = hexColor(h), BorderSizePixel = 0,
@@ -1583,7 +1895,7 @@ local function applyPrefs()
     fitWindow(); S.refreshToggles()
 end
 grid(settingsPage, {
-    { 'Enregistrer', function()
+    { 'Enregistrer le profil', function()
         local n = profileName(); if not n then return end
         local count = 0
         for _ in pairs(profiles) do count = count + 1 end
@@ -1593,13 +1905,13 @@ grid(settingsPage, {
         profiles[n] = p
         refreshProfiles(); saveSettings(); logLine('Profil enregistre : ' .. n)
     end },
-    { 'Charger', function()
+    { 'Charger le profil', function()
         local n = profileName(); if not n then return end
         if type(profiles[n]) ~= 'table' then logLine('Profil introuvable : ' .. n); return end
         readPrefs(profiles[n], ui)
         applyPrefs(); saveSettings(); logLine('Profil charge : ' .. n)
     end },
-    { 'Supprimer', function()
+    { 'Supprimer le profil', function()
         local n = profileName(); if not n then return end
         if profiles[n] == nil then logLine('Profil introuvable : ' .. n); return end
         profiles[n] = nil
@@ -1640,9 +1952,10 @@ adv(grid(settingsPage, {
     { 'Vendeur = ici', S.markVendor },
     { 'ATM = ici', S.markAtm },
     { 'Visee souris (3 s)', function()
+        local aimToken = S.token
         logLine('Place la souris sur l\'eau : capture dans 3 s')
         task.delay(3, function()
-            if not S.running then return end
+            if not alive(aimToken) then return end
             local m = UIS:GetMouseLocation()
             S.baitScreenPoint = Vector2.new(m.X, m.Y)
             logLine(string.format('Visee enregistree a %.0f, %.0f', m.X, m.Y))
@@ -1671,9 +1984,72 @@ adv(grid(settingsPage, {
     { 'Diagnostic ecran', function() S.dumpGui() end },
     { 'Fermer le script', function() S.stop() end },
 }))
+-- Tableau AFK et journal bornes, rafraichis par la boucle existante.
+do
+local function names(list)
+    local out = {}; for n in pairs(list) do out[#out + 1] = n end; table.sort(out)
+    return #out == 0 and 'aucun' or table.concat(out, ', ')
+end
+function S.refreshDashboard()
+    local h, m = S.hub, S.hub.money
+    local snap = h:snapshot(os.clock())
+    local rate = snap.hourly and string.format('%.0f / h', snap.hourly) or 'N/D (< 60 s)'
+    local text = string.format('Activite : %s | Etat : %s\nSession : %.0f s | Gains observes en ventes : %.0f | Estimation : %s\nLancers : %d | Mini-jeu : %d clics | Erreurs : %d',
+        snap.activity, S.state, snap.elapsed, snap.earned, rate, S.castAttempts, S.clicks, #h.errors)
+    if S.views.dashboard then S.views.dashboard.Text = text end
+    if S.views.money then S.views.money.Text = string.format('Solde observe : %s\nVentes avec montant : %d | Gains : %.0f\nDepots observes : %d | Total depose : %.0f\nAppats lus : %s | Baisses : %d | Ajouts : %d\nTaux horaire : %s',
+        m.cash == nil and 'N/D' or tostring(m.cash), m.sales, m.earned, m.deposits, m.deposited,
+        m.bait == nil and 'N/D' or tostring(m.bait), m.baitUsed, m.baitAdded, rate) end
+    if S.views.spots then S.views.spots.Text = 'Spots : ' .. names(h.library.spots) .. '\nActif : ' .. tostring(h.activeSpot or 'aucun') end
+    if S.views.routes then S.views.routes.Text = 'Destinations : ' .. names(h.library.routes) .. '\nTrajet tampon : ' .. #S.recordBuffer .. ' points\n' .. tostring(S.driveStatus) end
+    if S.views.farm then S.views.farm.Text = (h.farm.available and 'Adaptateur local charge (validation jeu requise)' or 'Adaptateur BlockSpin absent')
+        .. string.format('\nPlantations confirmees : %d | Recoltes confirmees : %d\nPassages : %d', h.farm.planted, h.farm.harvested, h.farm.cycles) end
+    local lines = {}
+    for n, stat in pairs(h.spotStats) do
+        lines[#lines + 1] = string.format('%s : %d lancers, %d textes, %d signaux rares, %.0f s', n, stat.casts, stat.texts, stat.rareSignals, stat.seconds)
+    end
+    table.sort(lines)
+    if S.views.spotStats then
+        S.views.spotStats.Text = #lines > 0 and table.concat(lines, '\n') or 'Aucun spot actif mesure. Les textes et signaux rares sont heuristiques, pas des captures confirmees.'
+        S.views.spotStats.Size = UDim2.new(1, 0, 0, math.max(64, #lines * 32))
+    end
+    lines = {}
+    for i = math.max(1, #h.errors - 7), #h.errors do
+        local e = h.errors[i]; lines[#lines + 1] = e.stage .. ' : ' .. e.message
+    end
+    if S.views.errors then S.views.errors.Text = #lines > 0 and table.concat(lines, '\n') or 'Aucune erreur enregistree cette session' end
+    S.design.refresh()
+end
+local emergency = button(gui, 'STOP / F12', S.cancel, 38)
+emergency.Name = 'EmergencyStop'; emergency.Size = UDim2.fromOffset(112, 38)
+emergency.Position = UDim2.new(1, -124, 1, -50); emergency.ZIndex = 30
+emergency.BackgroundColor3 = theme.danger
+-- Un bouton visible meme si le menu est masque pendant la peche.
+S.refreshDashboard()
+end
+
 S.window = window
 fitWindow()
 updateTabs()
+S.design.refresh()
+window.GroupTransparency = ui.animations and 1 or 0
+menuScale.Scale = ui.animations and ui.scale * 0.98 or ui.scale
+S.setMenuVisible(true)
+
+-- Recalcul lors d'un changement de camera ou de resolution Roblox.
+do
+local cameraConnection
+local function attachViewport()
+    if cameraConnection then cameraConnection:Disconnect() end
+    local camera=workspace.CurrentCamera
+    if camera and camera.GetPropertyChangedSignal then
+        cameraConnection=connect(camera:GetPropertyChangedSignal('ViewportSize'),function() fitWindow();S.design.refresh() end)
+    end
+    fitWindow()
+end
+connect(workspace:GetPropertyChangedSignal('CurrentCamera'),attachViewport)
+attachViewport()
+end
 
 -- deplacement (en-tete), redimensionnement (<>), overlay deplacable
 local gesture
@@ -1747,8 +2123,9 @@ local function rareTrigger(text)
     logLine('POISSON RARE detecte : "' .. text:sub(1, 50) .. '" -> ' .. RARE_ACTIONS[ui.rareAction])
     S.toast('Poisson rare : ' .. text:sub(1, 40), 'rare')
     if ui.rareAction == 'leave' then
+        local rareToken = S.token
         task.delay(1, function()
-            if S.running then pcall(function() player:Kick('BlockSpin hub : poisson rare detecte (' .. text:sub(1, 40) .. ')') end) end
+            if alive(rareToken) and not S.paused then pcall(function() player:Kick('BlockSpin hub : poisson rare detecte (' .. text:sub(1, 40) .. ')') end) end
         end)
     elseif ui.rareAction == 'sell' then
         if not carValid() then logLine('Aller vendre impossible : aucune voiture memorisee'); return end
@@ -1765,11 +2142,12 @@ function S.scanCatch(now)
             local f = fold(t)
             -- index : textes courts avec des lettres (probablement le nom du poisson)
             if #t >= 3 and #t <= 40 and f:find('%a%a') and not f:find('^[%s%d%p]*$') then
-                S.fishLog[t] = (S.fishLog[t] or 0) + 1; changed = true
+                S.fishLog[t] = (S.fishLog[t] or 0) + 1; changed = true; S.spotEvent('texts')
             end
             local rare = false
             for _, w in ipairs(RARE_WORDS) do if f:find(w, 1, true) then rare = true end end
             if not rare and ui.rarePurple and isPurple(o.TextColor3) then rare = true end
+            if rare then S.spotEvent('rareSignals') end
             if rare and ui.rareAction ~= 'none' and os.clock() > rareCooldownUntil and S.running then rareTrigger(t) end
         end
     end
@@ -1788,7 +2166,7 @@ connect(RunService.RenderStepped, function(dt)
     if ui.metrics or ui.overlay then
         local ok, ping = pcall(function() return player:GetNetworkPing() end)
         local pingText = (ok and isNum(ping) and ping >= 0) and string.format('%.0f ms', ping * 1000) or 'N/D'
-        local txt = string.format('FPS %.0f | %s', frames / elapsed, pingText)
+        local txt = string.format('FPS %.0f | Ping %s', frames / elapsed, pingText)
         metrics.Text = txt; overlay.Text = txt
     end
     if carInfo.Parent then
@@ -1829,13 +2207,15 @@ local function findMinigame()
         end
     end
 end
-local function sendClick()
+local function sendClick(tok)
+    if not alive(tok) or S.paused then return false, 'annule' end
     if type(mouse1click) == 'function' then
         if pcall(mouse1click) then return true, 'mouse1click' end
     end
     if type(mouse1press) == 'function' and type(mouse1release) == 'function' then
-        if pcall(function() mouse1press(); task.wait(0.025); mouse1release() end) then return true, 'mouse1press/release' end
+        if pcall(function() mouseHeld = true; mouse1press(); task.wait(0.025); if alive(tok) then releaseMouse() end end) then return alive(tok), 'mouse1press/release' end
     end
+    if not alive(tok) then return false, 'annule' end
     local ok = pcall(function()
         local pos = UIS:GetMouseLocation()
         VIM:SendMouseButtonEvent(pos.X, pos.Y, 0, true, game, 0)
@@ -1859,6 +2239,7 @@ local function tryCast(now)
     aimAtSavedPoint()
     lastCast = now
     S.castAttempts = S.castAttempts + 1
+    S.spotEvent('casts')
     local ok, err = pcall(function() tool:Activate() end)
     if ok then update('lancer ' .. S.castAttempts .. ' (' .. tool.Name .. ')')
     else update('erreur lancer : ' .. tostring(err):sub(1, 70)) end
@@ -1884,15 +2265,32 @@ table.insert(conns, RunService.Heartbeat:Connect(function()
     if not S.running then return end
     local ok, err = pcall(function()
         local now = os.clock()
+        if S.hub:expired(now, S.token) then
+            local name = S.hub.current.name
+            cancelAll('delai maximal depasse : ' .. name)
+            S.autoCycle = false; S.paused = true
+            setState('ERROR', name .. ' : delai maximal depasse')
+            return
+        end
         if now >= nextCheck then
             nextCheck = now + 0.8
-            S.checkInventory(); checkBait(); refreshInfo(); S.scanCatch(now)
+            S.checkInventory(); checkBait(); refreshInfo()
+            if not S.paused then S.scanCatch(now) end
+            if S.refreshDashboard then S.refreshDashboard() end
+            local spot = S.hub.activeSpot and S.hub.library.spots[S.hub.activeSpot]
+            local root = getRoot()
+            if spot and root and S.fishingEnabled and not S.paused and not S.cycleRunning
+                and (root.Position - v3(spot.cf)).Magnitude <= 8 then
+                S.hub:spotTime(math.min(2, now - (S.spotTick or now)))
+            end
+            S.spotTick = now
             if S.recording then
                 local seat = currentSeat()
                 if seat then
                     local p = seat.Position
                     local last = S.recordBuffer[#S.recordBuffer]
-                    if not last or (Vector3.new(last[1], last[2], last[3]) - p).Magnitude > 14 then
+                    if #S.recordBuffer >= 2000 then S.recording = false; logLine('Maximum 2000 points atteint') end
+                    if S.recording and (not last or (Vector3.new(last[1], last[2], last[3]) - p).Magnitude > 14) then
                         S.recordBuffer[#S.recordBuffer + 1] = { p.X, p.Y, p.Z }
                     end
                     update('ENREGISTREMENT : ' .. #S.recordBuffer .. ' points (bouton Conduite pour finir)')
@@ -1917,12 +2315,12 @@ table.insert(conns, RunService.Heartbeat:Connect(function()
                 runCycle(false)
             end
         end
-        if not S.fishingEnabled or S.cycleRunning then return end
+        if not S.fishingEnabled or S.paused or S.cycleRunning then return end
         local panel, target, needle = findMinigame()
         -- le menu ne doit pas recevoir les clics du mini-jeu (clic a la position du curseur)
         if panel then S.minigameSeenAt = os.clock() end
-        if panel and ui.hideInMinigame and window.Visible then window.Visible = false; S.hiddenForMinigame = true end
-        if not panel and S.hiddenForMinigame and os.clock() - (S.minigameSeenAt or 0) > 1.5 then window.Visible = true; S.hiddenForMinigame = false end
+        if panel and ui.hideInMinigame and S.design.menuVisible then S.setMenuVisible(false, true); S.hiddenForMinigame = true end
+        if not panel and S.hiddenForMinigame and os.clock() - (S.minigameSeenAt or 0) > 1.5 then S.setMenuVisible(true); S.hiddenForMinigame = false end
         if not panel then
             if minigameWasVisible then minigameWasVisible = false; lastMinigameEnd = os.clock(); S.onMinigameEnd(lastMinigameEnd) end
             if currentPanel then resetPanel(nil) end
@@ -1960,10 +2358,12 @@ table.insert(conns, RunService.Heartbeat:Connect(function()
         if now - lastClick >= 0.45 and predicted >= left + margin and predicted <= right - margin then
             armed = false; pending = true; exitedAfterClick = false; lastClick = now; clickX = x
             roundsInPanel = roundsInPanel + 1; S.rounds = S.rounds + 1
+            local clickToken = S.token
             task.spawn(function()
-                local success, method = sendClick()
+                if not alive(clickToken) or S.paused then pending = false; return end
+                local success, method = sendClick(clickToken)
                 pending = false
-                if not S.running then return end
+                if not alive(clickToken) or S.paused then return end
                 S.method = method
                 if success then
                     S.clicks = S.clicks + 1
@@ -1975,7 +2375,7 @@ table.insert(conns, RunService.Heartbeat:Connect(function()
             end)
         end
     end)
-    if not ok then update('ERREUR : ' .. tostring(err):sub(1, 95)) end
+    if not ok then S.hub:error('Heartbeat', err, os.clock()); update('ERREUR : ' .. tostring(err):sub(1, 95)) end
 end))
 
 ---------------------------------------------------------------------------
@@ -1998,12 +2398,13 @@ connect(UIS.InputBegan, function(input, processed)
     end
     if processed or UIS:GetFocusedTextBox() then return end
     if input.KeyCode == Enum.KeyCode[ui.hotkey] then
-        window.Visible = not window.Visible
+        S.setMenuVisible(not S.design.menuVisible)
         S.hiddenForMinigame = false
         gesture = nil
     end
 end)
 function S.useRecording(which)
+    if S.cycleRunning or S.recording then return false, 'activite ou enregistrement en cours' end
     if #S.recordBuffer < 2 then return false, 'tampon vide' end
     local key = (which == 'retour') and 'route_to_fishing' or (which == 'aller' and 'route_to_vendor') or nil
     if not key then return false, 'preciser "aller" ou "retour"' end
@@ -2017,7 +2418,7 @@ function S.pause() S.paused = true end
 function S.resume()
     local info = readCapacity()
     if info and info.count >= info.limit then S.inventoryFull = true; return false end
-    S.paused = false; S.cycleFailures = 0
+    S.paused = false; S.fishingEnabled = true; S.cycleFailures = 0
     if S.state == 'ERROR' then setState('IDLE', '') end
     return true
 end
@@ -2030,7 +2431,10 @@ function S.stop()
     if not S.running then return end
     S.token = S.token + 1
     S.running = false
+    if S.design then S.design.cleanup() end
     S.recording = false
+    S.hub.farm.running = false
+    S.hub:finishStep(false, 'arret complet', os.clock())
     releaseAll(); releaseMouse()
     for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
     conns = {}

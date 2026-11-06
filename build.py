@@ -1,8 +1,12 @@
-"""Assemble src/main.lua (script complet a coller dans Xeno ou charge par loader.lua) : injecte data/route_data.json dans src/cycle.lua.
-Usage : python -I build.py   (depuis n'importe quel dossier)"""
+"""Assemble le script unique : cycle.lua + hub_core.lua + interface.lua + route_data.json.
+Usage : python -I build.py [--check] (depuis n'importe quel dossier)."""
+import argparse
 import json
 import pathlib
 
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--check", action="store_true", help="verifier sans reecrire main.lua")
+args = parser.parse_args()
 ROOT = pathlib.Path(__file__).resolve().parent
 src = (ROOT / "src" / "cycle.lua").read_text(encoding="utf-8")
 data = json.loads((ROOT / "data" / "route_data.json").read_text(encoding="utf-8"))
@@ -33,6 +37,18 @@ block = "\n".join([
 ])
 marker = "--@@DEFAULT_DATA@@"
 assert src.count(marker) == 1, "marqueur absent"
-out = src.replace(marker, block)
-(ROOT / "src" / "main.lua").write_text(out, encoding="utf-8", newline="\n")
-print("ecrit src/main.lua", len(out.splitlines()), "lignes")
+core_marker = "--@@HUB_CORE@@"
+assert src.count(core_marker) == 1, "marqueur hub absent"
+core = (ROOT / "src" / "hub_core.lua").read_text(encoding="utf-8")
+interface_marker = "--@@INTERFACE@@"
+assert src.count(interface_marker) == 1, "marqueur interface absent"
+interface = (ROOT / "src" / "interface.lua").read_text(encoding="utf-8")
+out = src.replace(marker, block).replace(core_marker, "local Hub = (function()\n" + core + "\nend)()").replace(interface_marker, interface)
+target = ROOT / "src" / "main.lua"
+if args.check:
+    if not target.exists() or target.read_text(encoding="utf-8") != out:
+        parser.exit(1, "src/main.lua obsolete : lancer python -I build.py\n")
+    print("OK : src/main.lua correspond aux sources et aux donnees")
+else:
+    target.write_text(out, encoding="utf-8", newline="\n")
+    print("ecrit src/main.lua", len(out.splitlines()), "lignes")
