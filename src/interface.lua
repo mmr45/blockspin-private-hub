@@ -121,6 +121,9 @@ function D.newCard(page, title)
     make('UIListLayout',{Padding=UDim.new(0,9),SortOrder=Enum.SortOrder.LayoutOrder},card)
     local heading=text(card,title,14,theme.text); heading.Name='CardTitle';heading.Font=Enum.Font.GothamBold
     heading.Size=UDim2.new(1,0,0,24);heading.LayoutOrder=0
+    card.Name='Card'
+    local key=meta.name..':'..tostring(#meta.cards+1)
+    D.cardKeys=D.cardKeys or {};D.cardKeys[card]=key
     meta.cards[#meta.cards+1]=card; D.cards[#D.cards+1]=card;meta.current=card
     return card,heading
 end
@@ -137,7 +140,7 @@ end
 function D.addPage(page,name)
     local hero=make('Frame',{Name='SessionTiles',Size=UDim2.new(1,0,0,66),BackgroundTransparency=1,LayoutOrder=0},page)
     local tileNames={Fishing={'INVENTAIRE','APPÂTS','LANCERS'},Vehicle={'VÉHICULE','DESTINATIONS','POINTS'},Money={'GAINS','PORTEFEUILLE','ESTIMATION'},
-        Farming={'PLANTATIONS','RÉCOLTES','PASSAGES'},Statistics={'SESSION','LANCERS','ERREURS'},Settings={'ACCENT','ÉCHELLE','ANIMATIONS'},Server={'JOUEURS','CAPACITÉ','PING'}}
+        Farming={'PARCELLES SUIVIES','PRÊTES OBSERVÉES','PROCHAINE ÉCHÉANCE'},Statistics={'SESSION','LANCERS','ERREURS'},Settings={'ACCENT','ÉCHELLE','ANIMATIONS'},Server={'JOUEURS','CAPACITÉ','PING'}}
     local keys=tileNames[name] or {'INVENTAIRE','APPÂTS','SESSION'}
     local values={}
     for i,key in ipairs(keys) do
@@ -334,7 +337,10 @@ function D.layout()
     local twoColumns=w-side-40>=600
     for page,meta in pairs(D.pages) do
         local heights={0,0}
-        for _,card in ipairs(meta.cards) do
+        local cards={};for i,card in ipairs(meta.cards) do cards[#cards+1]={card=card,index=i,layout=ui.cardLayouts and ui.cardLayouts[D.cardKeys[card]] or {}} end
+        table.sort(cards,function(a,b) local x,y=a.layout.rank or a.index,b.layout.rank or b.index;if x==y then return a.index<b.index end;return x<y end)
+        for _,entry in ipairs(cards) do
+            local card=entry.card
             local children={}
             for _,child in ipairs(card:GetChildren()) do
                 if child:IsA('GuiObject') and child.Visible and child.Name~='CardTitle' then children[#children+1]=child end
@@ -345,12 +351,17 @@ function D.layout()
             if heading and heading.Visible then height=height+24+(count>0 and 9 or 0) end
             for _,child in ipairs(children) do height=height+child.Size.Y.Offset end
             height=height+math.max(0,count-1)*9
-            card.Visible=count>0
-            if count>0 then
-                local column=twoColumns and (heights[1]<=heights[2] and 1 or 2) or 1
-                card.Size=UDim2.new(twoColumns and 0.5 or 1,twoColumns and -7 or 0,0,height)
+            local hidden=entry.layout.hidden and not (D.protectedCards and D.protectedCards[card])
+            card.Visible=count>0 and not hidden
+            if count>0 and not hidden then
+                local wide=entry.layout.wide==true
+                if wide then local start=math.max(heights[1],heights[2]);heights={start,start} end
+                local split=twoColumns and not wide
+                local column=split and (heights[1]<=heights[2] and 1 or 2) or 1
+                card.Size=UDim2.new(split and 0.5 or 1,split and -7 or 0,0,height)
                 card.Position=UDim2.new(column==2 and 0.5 or 0,column==2 and 7 or 0,0,heights[column])
                 heights[column]=heights[column]+height+14
+                if wide then heights[2]=heights[1] end
             end
         end
         meta.columns.Size=UDim2.new(1,0,0,math.max(0,math.max(heights[1],heights[2])-14))

@@ -1,10 +1,10 @@
--- BlockSpin Hub v1.1.1
+-- BlockSpin Hub v1.2.0
 -- Peche auto (logique v0.6.8 conservee) + cycle vente/ATM par conduite NATIVE sur route
 -- (touches simulees W/A/S/D, aucun deplacement de CFrame, aucune teleportation).
 -- Aucun passage sous la carte : non implemente volontairement (voir README_v080.md).
 -- Arret complet : getgenv().BlockSpinCycle080.stop()
 -- Arret d'urgence du cycle/conduite (le script reste charge) : F12
-local VERSION = '1.1.1'
+local VERSION = '1.2.0'
 local E = (getgenv and getgenv()) or _G
 
 ---------------------------------------------------------------------------
@@ -288,7 +288,161 @@ function Core.newServer(now,maxPlayers)
     end
     return server
 end
+-- Observatoire V1.2 : calculs locaux uniquement. Aucune hierarchie de jeu supposee.
+function Core.parseDuration(value)
+    if finite(value) then return value>=0 and value<=604800 and value or nil end
+    if type(value)~='string' or #value>150 then return nil end
+    local s=value:gsub('<[^>]*>',''):lower():match('^%s*(.-)%s*$')
+    local h,m,sec=s:match('^(%d+):(%d%d):(%d%d)$')
+    if h then if tonumber(m)>59 or tonumber(sec)>59 then return nil end;return Core.parseDuration(tonumber(h)*3600+tonumber(m)*60+tonumber(sec)) end
+    m,sec=s:match('^(%d+):(%d%d)$')
+    if m then if tonumber(sec)>59 then return nil end;return Core.parseDuration(tonumber(m)*60+tonumber(sec)) end
+    local total,found=0,false
+    for n,unit in s:gmatch('(%d+)%s*([hms])') do total=total+tonumber(n)*({h=3600,m=60,s=1})[unit];found=true end
+    if found and s:gsub('%d+%s*[hms]',''):match('^%s*$') then return Core.parseDuration(total) end
+    return nil -- pas de nombre nu dans un texte : pourrait etre un prix ou un niveau
+end
+function Core.parsePercent(value)
+    if finite(value) then return value>=0 and value<=100 and value or nil end
+    if type(value)~='string' or #value>100 then return nil end
+    local n=value:gsub('<[^>]*>',''):match('^%s*(%d+[.,]?%d*)%s*%%%s*$')
+    return n and Core.parsePercent(tonumber((n:gsub(',','.')))) or nil
+end
+function Core.duration(n)
+    if not finite(n) then return 'N/D' end
+    n=math.max(0,math.ceil(n))
+    if n>=3600 then return string.format('%02d:%02d:%02d',math.floor(n/3600),math.floor(n/60)%60,n%60) end
+    return string.format('%02d:%02d',math.floor(n/60),n%60)
+end
+function Core.newPlants(serverKey)
+    local t={serverKey=serverKey,plots={},revision=0,events={}}
+    function t:observe(sample,now)
+        if type(sample)~='table' or sample.serverKey~=self.serverKey or sample.owned~=true or not nameOK(sample.id) or not nameOK(sample.crop) or not finite(now) then return false,'identite ou propriete non confirmee' end
+        local seconds,percent=Core.parseDuration(sample.remaining),Core.parsePercent(sample.percent)
+        if not seconds or not percent then return false,'temps et pourcentage requis' end
+        local p=self.plots[sample.id]
+        if not p then
+            local count=0;for _ in pairs(self.plots) do count=count+1 end
+            if count>=50 then return false,'50 parcelles maximum' end
+        end
+        local changed=not p or p.seconds~=seconds or p.percent~=percent or p.crop~=sample.crop or p.restored
+        if not changed then
+            if p.ready then p.observed=now;p.missing=false end
+            return true,'lecture identique : echeance conservee'
+        end
+        local reset=p and (p.crop~=sample.crop or (percent<p.percent and seconds>p.seconds))
+        local generation=p and (p.generation+(reset and 1 or 0)) or 1
+        p={id=sample.id,crop=sample.crop,seconds=seconds,percent=percent,observed=now,deadline=now+seconds,
+            generation=generation,ready=seconds==0 and percent==100,position=copy(sample.position),source=tostring(sample.source or ''):sub(1,512),alerts={}}
+        local old=self.plots[sample.id]
+        if old and not reset then p.alerts=old.alerts end
+        if p.position and (type(p.position)~='table' or #p.position~=3 or not finite(p.position[1]) or not finite(p.position[2]) or not finite(p.position[3])) then return false,'position invalide' end
+        self.plots[p.id]=p;self.revision=self.revision+1
+        bounded(self.events,{kind=not old and 'observed' or (reset and 'restart' or (p.ready and 'ready' or 'update')),id=p.id,at=now},80)
+        return true
+    end
+    function t:remove(id,confirmed)
+        if confirmed~=true or not self.plots[id] then return false end
+        self.plots[id]=nil;self.revision=self.revision+1;return true
+    end
+    function t:rows(now,position,group)
+        local out={}
+        for _,p in pairs(self.plots) do
+            local r=copy(p);r.remaining=math.max(0,p.deadline-now);r.age=math.max(0,now-p.observed)
+            r.estimated=p.restored==true or p.missing==true or r.age>3
+            r.status=p.ready and (r.estimated and 'Derniere maturite observee' or 'Prete (observe)') or (r.remaining==0 and 'Echeance estimee' or (r.estimated and 'Estime' or 'Observe'))
+            r.projectedPercent=p.percent
+            if p.seconds>0 and p.percent<100 then r.projectedPercent=math.min(100,p.percent+(100-p.percent)*math.min(1,r.age/p.seconds)) end
+            if position and p.position then local d=0;for i=1,3 do d=d+(position[i]-p.position[i])^2 end;r.distance=math.sqrt(d) end
+            out[#out+1]=r
+        end
+        table.sort(out,function(a,b)
+            if group and a.crop~=b.crop then return a.crop<b.crop end
+            if a.remaining~=b.remaining then return a.remaining<b.remaining end
+            return a.id<b.id
+        end)
+        return out
+    end
+    function t:alerts(now,threshold)
+        local out={}
+        for _,p in ipairs(self:rows(now)) do
+            local key=p.ready and not p.estimated and 'ready' or (p.remaining>0 and p.remaining<=threshold and 'soon' or nil)
+            local original=self.plots[p.id]
+            if key and not original.alerts[key] then original.alerts[key]=true;out[#out+1]={id=p.id,kind=key,estimated=p.estimated} end
+        end
+        return out
+    end
+    return t
+end
+function Core.pingSummary(values)
+    local a={};local sum=0
+    for _,n in ipairs(values or {}) do if finite(n) and n>=0 then a[#a+1]=n;sum=sum+n end end
+    if #a==0 then return {} end
+    table.sort(a);local mid=math.floor((#a+1)/2)
+    return {count=#a,min=a[1],max=a[#a],mean=sum/#a,median=#a%2==1 and a[mid] or (a[mid]+a[mid+1])/2}
+end
+function Core.filterRoster(server,query,order,friends)
+    local rows={};query=tostring(query or ''):lower():sub(1,64)
+    for _,p in ipairs(server:roster()) do
+        if query=='' or p.name:lower():find(query,1,true) or p.display:lower():find(query,1,true) then rows[#rows+1]=p end
+    end
+    table.sort(rows,function(a,b)
+        if order=='friends' and (friends[a.id]==true)~=(friends[b.id]==true) then return friends[a.id]==true end
+        if order=='recent' and a.observed~=b.observed then return a.observed>b.observed end
+        if a.name:lower()==b.name:lower() then return a.id<b.id end
+        return a.name:lower()<b.name:lower()
+    end)
+    return rows
+end
+function Core.validateServers(payload,currentJob,minFree,maxPopulation)
+    if type(payload)~='table' or type(payload.data)~='table' or #payload.data>100 then return nil,'liste publique invalide' end
+    local out,seen={},{}
+    for _,r in ipairs(payload.data) do
+        if type(r)=='table' and type(r.id)=='string' and #r.id<=128 and r.id:match('^[%w%-]+$') and not seen[r.id]
+            and finite(r.playing) and r.playing>=0 and r.playing%1==0 and finite(r.maxPlayers) and r.maxPlayers>0 and r.maxPlayers%1==0 and r.playing<=r.maxPlayers then
+            seen[r.id]=true
+            if r.id~=currentJob and r.maxPlayers-r.playing>=minFree and r.playing<=maxPopulation then out[#out+1]={id=r.id,playing=r.playing,maxPlayers=r.maxPlayers} end
+        end
+    end
+    local cursor=payload.nextPageCursor
+    if cursor~=nil and (type(cursor)~='string' or #cursor>512 or cursor:find('%c')) then return nil,'curseur invalide' end
+    return out,cursor
+end
+function Core.validWorkspace(data)
+    if type(data)~='table' or data.schema~=1 or type(data.favorites)~='table' or type(data.sessions)~='table' or type(data.plants)~='table' then return nil,'format observatoire invalide' end
+    if #data.favorites>30 or #data.sessions>30 or #data.plants>50 then return nil,'limite observatoire depassee' end
+    local function identifier(s) return type(s)=='string' and #s>0 and #s<=128 and s:match('^[%w%-]+$') end
+    local out={schema=1,favorites={},sessions={},plants={},serverKey=type(data.serverKey)=='string' and data.serverKey:sub(1,160) or ''}
+    local seen={}
+    for _,v in ipairs(data.favorites) do
+        if type(v)~='table' or not identifier(v.job) or not finite(v.place) or v.place<1 or v.place%1~=0 or not nameOK(v.name) or seen[v.place..':'..v.job] then return nil,'favori invalide' end
+        seen[v.place..':'..v.job]=true;out.favorites[#out.favorites+1]={job=v.job,place=v.place,name=v.name}
+    end
+    for _,v in ipairs(data.sessions) do
+        if type(v)~='table' or not nameOK(v.id) or not finite(v.elapsed) or v.elapsed<0 or not finite(v.at) or not finite(v.increases) or v.increases<0 or not finite(v.decreases) or v.decreases<0 or not identifier(v.job) or not finite(v.place) or v.place<1 then return nil,'session invalide' end
+        out.sessions[#out.sessions+1]={id=v.id,elapsed=v.elapsed,at=v.at,increases=v.increases,decreases=v.decreases,job=v.job,place=v.place}
+    end
+    local t=Core.newPlants(out.serverKey)
+    for _,v in ipairs(data.plants) do
+        if type(v)~='table' or not finite(v.savedAt) then return nil,'plante sauvegardee invalide' end
+        local sample=copy(v);sample.owned=true;sample.serverKey=out.serverKey
+        if not t:observe(sample,v.savedAt) then return nil,'plante invalide' end
+        out.plants[#out.plants+1]={id=v.id,crop=v.crop,remaining=v.remaining,percent=v.percent,position=copy(v.position),savedAt=v.savedAt}
+    end
+    return out
+end
+function Core.validateQueue(rows)
+    if type(rows)~='table' or #rows<1 or #rows>20 then return nil,'1 a 20 etapes requises' end
+    local out={}
+    for _,r in ipairs(rows) do
+        if type(r)~='table' or not ({route=true,cycle=true,plants=true,pause=true})[r.kind] or not finite(r.timeout) or r.timeout<1 or r.timeout>1800 then return nil,'etape ou delai invalide' end
+        if r.kind=='route' and not nameOK(r.name) then return nil,'destination requise' end
+        out[#out+1]={kind=r.kind,name=r.name,timeout=r.timeout}
+    end
+    return out
+end
 Core.copy = copy
+Core.validName = nameOK
 return Core
 
 end)()
@@ -1422,6 +1576,9 @@ end
 -- 15. CYCLE : chaque etape = precondition, action, preuve, delai, erreur, annulation
 ---------------------------------------------------------------------------
 local function cancelAll(reason)
+    if S.observatory then
+        local o=S.observatory;o.queueTicket=(o.queueTicket or 0)+1;o.queueRunning=false;o.queueDeadline=nil;o.queueStatus='Arretee : '..tostring(reason or 'annule')
+    end
     S.token = S.token + 1
     S.castTicket=nil;S.castPending=false
     releaseAll(); releaseMouse()
@@ -1461,6 +1618,7 @@ function S.performStep(name, timeout, tok, action, verify)
 end
 
 local function runCycle(manual)
+    if S.observatory and S.observatory.queueRunning and not S.observatory.dispatching then return false,'file centrale en cours' end
     if S.cycleRunning or S.recording then return false, 'cycle ou enregistrement deja en cours' end
     S.token = S.token + 1
     local tok = S.token
@@ -1470,6 +1628,7 @@ local function runCycle(manual)
             if not alive(tok) then return end
             releaseAll(); releaseMouse()
             S.cycleRunning = false
+            S.lastCycleResult={token=tok,ok=false,detail=tostring(msg)}
             S.cycleFailures = S.cycleFailures + 1
             S.lastRouteError = stage .. ' : ' .. tostring(msg)
             setState('ERROR', S.lastRouteError)
@@ -1544,6 +1703,7 @@ local function runCycle(manual)
             if not equipRod(rodName) then logLine('Canne non re-equipee automatiquement : equipe-la') end
             S.checkInventory(); S.sellAttempts = 0; lastCast = -1e6
             S.cycleRunning = false; S.cycleFailures = 0
+            S.lastCycleResult={token=tok,ok=true}
             setState('FISHING', 'cycle complet termine')
             if S.toast then S.toast('Cycle termine : retour a la peche', 'ok') end
         end)
@@ -1556,6 +1716,7 @@ S.runCycle = function() return runCycle(true) end
 S.retryCycle = function() S.cycleFailures = 0; S.sellAttempts = 0; return runCycle(false) end
 
 local function testDrive(which, namedRoute)
+    if S.observatory and S.observatory.queueRunning and not S.observatory.dispatching then return false,'file centrale en cours' end
     if S.recording then return false, 'enregistrement en cours' end
     if S.cycleRunning then return false, 'cycle en cours' end
     if not currentSeat() then setState('ERROR', 'test conduite : monte au volant d\'abord'); return false end
@@ -1624,6 +1785,7 @@ local libraryFile = 'blockspin-library-v1.json'
 local libraryWritable = true
 local function idle()
     return S.running and not S.cycleRunning and not S.hub.current and not S.recording
+        and not (S.observatory and S.observatory.queueRunning and not S.observatory.dispatching)
 end
 function S.saveLibrary()
     if not libraryWritable then return false, 'fichier illisible preserve : corriger puis recharger explicitement' end
@@ -1727,6 +1889,7 @@ function S.setFarmingAdapter(adapter)
     return S.hub:setFarmAdapter(adapter)
 end
 function S.startFarm(plan, replant)
+    if S.observatory and S.observatory.queueRunning then return false,'file centrale en cours' end
     if not idle() then return false, 'activite en cours' end
     if not S.hub.farm.available then return false, 'Culture indisponible : interactions du jeu non observees. Utiliser Diagnostic ecran.' end
     if type(plan) ~= 'table' or #plan < 1 or #plan > 20 then return false, '1 a 20 parcelles requises' end
@@ -1846,9 +2009,13 @@ end
 ---------------------------------------------------------------------------
 local SETTINGS_FILE = 'blockspin-settings-v1.json'
 local ui = { accent = 'FF475C', hotkey = 'RightShift', scale = 1, metrics = true, overlay = false, hideInMinigame = true,
-    speedPreset = 'Rapide', rareAction = 'none', rarePurple = true, toasts = true, animations = true, layoutVersion = 2, density = 'normal' }
+    speedPreset = 'Rapide', rareAction = 'none', rarePurple = true, toasts = true, animations = true, layoutVersion = 2, density = 'normal',
+    privacy=false,miniDashboard=false,plantAlerts=true,plantAlertSeconds=60,plantGrouping=false,presenceAlerts=false,friendAlerts=false,rareNotifications=true,
+    serverMinFree=1,serverMaxPopulation=100,cardLayouts={},recentColors={},savedThemes={} }
 local PREF_KEYS = { 'accent', 'hotkey', 'scale', 'metrics', 'overlay', 'hideInMinigame', 'speedPreset', 'rareAction', 'rarePurple', 'toasts', 'animations',
-    'position', 'size', 'overlayPosition', 'layoutVersion', 'density', 'moneySourcePath' }
+    'position', 'size', 'overlayPosition', 'layoutVersion', 'density', 'moneySourcePath',
+    'privacy','miniDashboard','plantAlerts','plantAlertSeconds','plantGrouping','presenceAlerts','friendAlerts','rareNotifications',
+    'serverMinFree','serverMaxPopulation','cardLayouts','recentColors','savedThemes' }
 local RARE_ACTIONS = { none = 'ne rien faire', leave = 'quitter le serveur', sell = 'aller vendre' }
 local settingsRaw -- fichier lu en entier : profils et champs du hub 0.4.0 conserves
 local function validKeyName(n)
@@ -1857,6 +2024,24 @@ local function validKeyName(n)
     return ok and k ~= nil
 end
 local function readPrefs(d, into)
+    if type(d)~='table' then return end
+    for _,k in ipairs({'privacy','miniDashboard','plantAlerts','plantGrouping','presenceAlerts','friendAlerts','rareNotifications'}) do if type(d[k])=='boolean' then into[k]=d[k] end end
+    for k,range in pairs({plantAlertSeconds={10,600},serverMinFree={0,100},serverMaxPopulation={1,200}}) do if isNum(d[k]) and d[k]>=range[1] and d[k]<=range[2] then into[k]=math.floor(d[k]) end end
+    if type(d.cardLayouts)=='table' then
+        local rows={};local count=0
+        for key,v in pairs(d.cardLayouts) do
+            if count<150 and type(key)=='string' and #key<=80 and type(v)=='table' and isNum(v.rank) and v.rank>=1 and v.rank<=150 and type(v.hidden)=='boolean' and type(v.wide)=='boolean' then
+                rows[key]={rank=math.floor(v.rank),hidden=v.hidden,wide=v.wide};count=count+1
+            end
+        end
+        into.cardLayouts=rows
+    end
+    if type(d.recentColors)=='table' then local rows={};for _,v in ipairs(d.recentColors) do if #rows<8 and type(v)=='string' and v:match('^%x%x%x%x%x%x$') then rows[#rows+1]=v:upper() end end;into.recentColors=rows end
+    if type(d.savedThemes)=='table' then
+        local rows={};local count=0
+        for k,v in pairs(d.savedThemes) do if count<12 and Hub.validName(k) and type(v)=='string' and v:match('^%x%x%x%x%x%x$') then rows[k]=v:upper();count=count+1 end end
+        into.savedThemes=rows
+    end
     if type(d.moneySourcePath)=='string' and #d.moneySourcePath<=512 and not d.moneySourcePath:find('%c') then into.moneySourcePath=d.moneySourcePath end
     if d.density=='normal' or d.density=='compact' then into.density=d.density end
     if type(d.accent) == 'string' and d.accent:match('^%x%x%x%x%x%x$') then into.accent = d.accent end
@@ -1891,6 +2076,9 @@ S.ui = ui
 S.moneySourcePath=ui.moneySourcePath
 local profiles = (type(settingsRaw) == 'table' and type(settingsRaw.profiles) == 'table') and settingsRaw.profiles or {}
 local function saveSettings()
+    if ui.recentColors and ui.recentColors[1]~=ui.accent then
+        local rows={ui.accent};for _,h in ipairs(ui.recentColors) do if h~=ui.accent and #rows<8 then rows[#rows+1]=h end end;ui.recentColors=rows
+    end
     if type(writefile) ~= 'function' or not settingsWritable then return false end
     local out = {}
     if type(settingsRaw) == 'table' then for k, v in pairs(settingsRaw) do out[k] = v end end
@@ -2065,6 +2253,9 @@ function D.newCard(page, title)
     make('UIListLayout',{Padding=UDim.new(0,9),SortOrder=Enum.SortOrder.LayoutOrder},card)
     local heading=text(card,title,14,theme.text); heading.Name='CardTitle';heading.Font=Enum.Font.GothamBold
     heading.Size=UDim2.new(1,0,0,24);heading.LayoutOrder=0
+    card.Name='Card'
+    local key=meta.name..':'..tostring(#meta.cards+1)
+    D.cardKeys=D.cardKeys or {};D.cardKeys[card]=key
     meta.cards[#meta.cards+1]=card; D.cards[#D.cards+1]=card;meta.current=card
     return card,heading
 end
@@ -2081,7 +2272,7 @@ end
 function D.addPage(page,name)
     local hero=make('Frame',{Name='SessionTiles',Size=UDim2.new(1,0,0,66),BackgroundTransparency=1,LayoutOrder=0},page)
     local tileNames={Fishing={'INVENTAIRE','APPÂTS','LANCERS'},Vehicle={'VÉHICULE','DESTINATIONS','POINTS'},Money={'GAINS','PORTEFEUILLE','ESTIMATION'},
-        Farming={'PLANTATIONS','RÉCOLTES','PASSAGES'},Statistics={'SESSION','LANCERS','ERREURS'},Settings={'ACCENT','ÉCHELLE','ANIMATIONS'},Server={'JOUEURS','CAPACITÉ','PING'}}
+        Farming={'PARCELLES SUIVIES','PRÊTES OBSERVÉES','PROCHAINE ÉCHÉANCE'},Statistics={'SESSION','LANCERS','ERREURS'},Settings={'ACCENT','ÉCHELLE','ANIMATIONS'},Server={'JOUEURS','CAPACITÉ','PING'}}
     local keys=tileNames[name] or {'INVENTAIRE','APPÂTS','SESSION'}
     local values={}
     for i,key in ipairs(keys) do
@@ -2278,7 +2469,10 @@ function D.layout()
     local twoColumns=w-side-40>=600
     for page,meta in pairs(D.pages) do
         local heights={0,0}
-        for _,card in ipairs(meta.cards) do
+        local cards={};for i,card in ipairs(meta.cards) do cards[#cards+1]={card=card,index=i,layout=ui.cardLayouts and ui.cardLayouts[D.cardKeys[card]] or {}} end
+        table.sort(cards,function(a,b) local x,y=a.layout.rank or a.index,b.layout.rank or b.index;if x==y then return a.index<b.index end;return x<y end)
+        for _,entry in ipairs(cards) do
+            local card=entry.card
             local children={}
             for _,child in ipairs(card:GetChildren()) do
                 if child:IsA('GuiObject') and child.Visible and child.Name~='CardTitle' then children[#children+1]=child end
@@ -2289,12 +2483,17 @@ function D.layout()
             if heading and heading.Visible then height=height+24+(count>0 and 9 or 0) end
             for _,child in ipairs(children) do height=height+child.Size.Y.Offset end
             height=height+math.max(0,count-1)*9
-            card.Visible=count>0
-            if count>0 then
-                local column=twoColumns and (heights[1]<=heights[2] and 1 or 2) or 1
-                card.Size=UDim2.new(twoColumns and 0.5 or 1,twoColumns and -7 or 0,0,height)
+            local hidden=entry.layout.hidden and not (D.protectedCards and D.protectedCards[card])
+            card.Visible=count>0 and not hidden
+            if count>0 and not hidden then
+                local wide=entry.layout.wide==true
+                if wide then local start=math.max(heights[1],heights[2]);heights={start,start} end
+                local split=twoColumns and not wide
+                local column=split and (heights[1]<=heights[2] and 1 or 2) or 1
+                card.Size=UDim2.new(split and 0.5 or 1,split and -7 or 0,0,height)
                 card.Position=UDim2.new(column==2 and 0.5 or 0,column==2 and 7 or 0,0,heights[column])
                 heights[column]=heights[column]+height+14
+                if wide then heights[2]=heights[1] end
             end
         end
         meta.columns.Size=UDim2.new(1,0,0,math.max(0,math.max(heights[1],heights[2])-14))
@@ -2389,7 +2588,8 @@ function D.rowList(parent,id,limit,emptyLabel)
         local title=text(row,'',12,theme.text);title.Position=UDim2.fromOffset(28,4);title.Size=UDim2.new(0.7,-28,0,22)
         local sub=text(row,'',9,theme.muted);sub.Position=UDim2.fromOffset(28,25);sub.Size=UDim2.new(0.75,-28,0,14)
         local badge=text(row,'',10,theme.muted);badge.Position=UDim2.fromScale(0.7,0);badge.Size=UDim2.new(0.3,-12,1,0);badge.TextXAlignment=Enum.TextXAlignment.Right
-        list.pool[i]={root=row,title=title,sub=sub,badge=badge}
+        local avatar=make('ImageLabel',{Name='PlayerAvatar',Visible=false,BackgroundTransparency=1,Size=UDim2.fromOffset(30,30),Position=UDim2.fromOffset(8,7),Image=''},row);corner(avatar,8)
+        list.pool[i]={root=row,title=title,sub=sub,badge=badge,avatar=avatar,dot=dot}
         connect(row.Activated,function() if list.onSelect and list.rows and list.rows[i] then list.onSelect(list.rows[i]) end end)
     end
     function list:set(rows)
@@ -2397,7 +2597,14 @@ function D.rowList(parent,id,limit,emptyLabel)
         local n=math.min(#rows,self.limit);self.empty.Visible=n==0
         for i,entry in ipairs(self.pool) do
             entry.root.Visible=i<=n
-            if rows[i] then entry.title.Text=tostring(rows[i].title or '');entry.sub.Text=tostring(rows[i].sub or '');entry.badge.Text=tostring(rows[i].badge or '') end
+            if rows[i] then
+                local r=rows[i];entry.title.Text=tostring(r.title or '');entry.sub.Text=tostring(r.sub or '');entry.badge.Text=tostring(r.badge or '')
+                entry.avatar.Visible=isNum(r.avatarId) and r.avatarId>0
+                if entry.avatar.Visible then entry.avatar.Image='rbxthumb://type=AvatarHeadShot&id='..string.format('%.0f',r.avatarId)..'&w=150&h=150' end
+                entry.dot.Visible=not entry.avatar.Visible
+                entry.title.Position=UDim2.fromOffset(entry.avatar.Visible and 46 or 28,4);entry.title.Size=UDim2.new(0.7,entry.avatar.Visible and -46 or -28,0,22)
+                entry.sub.Position=UDim2.fromOffset(entry.avatar.Visible and 46 or 28,25)
+            end
         end
         self.root.Size=UDim2.new(1,0,0,n==0 and 42 or n*50-6)
     end
@@ -2521,10 +2728,14 @@ function D.buildServer(serverPage,action)
     local monitor=S.server
     local function added(p,baseline)
         if not S.running then return end
-        monitor:add(p.UserId,p.Name,p.DisplayName,os.clock(),baseline)
+        local changed=monitor:add(p.UserId,p.Name,p.DisplayName,os.clock(),baseline)
+        if changed and S.observatory then S.observatory.queueFriend(p);if not baseline then S.observatory.presence('arrivee',p.UserId) end end
     end
     connect(Players.PlayerAdded,function(p) added(p,false) end)
-    connect(Players.PlayerRemoving,function(p) if S.running then monitor:remove(p.UserId,os.clock()) end end)
+    connect(Players.PlayerRemoving,function(p) if S.running then
+        if S.observatory then S.observatory.presence('depart',p.UserId) end
+        monitor:remove(p.UserId,os.clock())
+    end end)
     local ok,players=pcall(function() return Players:GetPlayers() end)
     if ok then for _,p in ipairs(players) do added(p,true) end end
     D.section(serverPage,'Serveur en direct')
@@ -2615,13 +2826,17 @@ function D.refreshVisuals()
         if meta.name=='Money' then vals={shortMoney(m.observedIncreases),shortMoney(S.moneyReading and S.moneyReading.available and S.moneyReading.value or nil),rate}
         elseif meta.name=='Vehicle' then vals={S.car and S.car.name or '—',tostring(countKeys(h.library.routes)),tostring(#S.recordBuffer)}
         elseif meta.name=='Server' then vals={S.server and tostring(S.server.count) or '—',S.server and tostring(S.server.maxPlayers or '?') or '—',isNum(D.lastPing) and string.format('%.0f ms',D.lastPing*1000) or 'N/D'}
-        elseif meta.name=='Farming' then vals={tostring(h.farm.planted),tostring(h.farm.harvested),tostring(h.farm.cycles)}
+        elseif meta.name=='Farming' then
+            local rows=S.observatory and S.observatory.plants:rows(os.clock()) or {};local ready=0
+            for _,r in ipairs(rows) do if r.ready and not r.estimated then ready=ready+1 end end
+            vals={tostring(#rows),tostring(ready),rows[1] and ((rows[1].estimated and '~ ' or '')..Hub.duration(rows[1].remaining)) or '—'}
         elseif meta.name=='Settings' then vals={'#'..ui.accent,string.format('%.0f %%',ui.scale*100),ui.animations and 'Activées' or 'Coupées'}
         elseif meta.name=='Statistics' then vals={string.format('%02d:%02d',math.floor(snap.elapsed/60),math.floor(snap.elapsed%60)),tostring(S.castAttempts),tostring(#h.errors)}
         else vals={S.inventoryText or '—',S.baitUnknown and '—' or 'x'..tostring(S.baitCount),tostring(S.castAttempts)} end
         for i,v in ipairs(vals) do meta.tiles[i].Text=v end
     end
     D.refreshServer()
+    if D.refreshInsights then D.refreshInsights() end
 end
 
 
@@ -3061,6 +3276,8 @@ toggle(settingsPage, function() return 'Annonces en haut de l\'ecran : ' .. (ui.
     function() ui.toasts = not ui.toasts; saveSettings(); if ui.toasts then S.toast('Annonces activees', 'info') end end)
 toggle(settingsPage, function() return 'Detecter aussi les textes violets : ' .. (ui.rarePurple and 'oui' or 'non') end,
     function() ui.rarePurple = not ui.rarePurple; saveSettings() end)
+toggle(settingsPage,function() return 'Notifier les signaux rares : '..(ui.rareNotifications and 'oui' or 'non') end,
+    function() ui.rareNotifications=not ui.rareNotifications;saveSettings() end)
 local capturing = false
 local function keyText() return 'Touche pour masquer le menu : ' .. ui.hotkey end
 local hotkeyButton = button(settingsPage, keyText(), function(b) capturing = true; b.Text = 'Appuie sur une touche... (Echap : annuler)' end)
@@ -3104,7 +3321,7 @@ grid(settingsPage, {
         for _ in pairs(profiles) do count = count + 1 end
         if not profiles[n] and count >= 10 then logLine('Maximum 10 profils'); return end
         local p = {}
-        for _, k in ipairs(PREF_KEYS) do p[k] = ui[k] end
+        for _, k in ipairs(PREF_KEYS) do p[k] = Hub.copy(ui[k]) end
         profiles[n] = p
         refreshProfiles(); saveSettings(); logLine('Profil enregistre : ' .. n)
     end },
@@ -3203,6 +3420,803 @@ emergency.BackgroundColor3 = theme.danger
 S.refreshDashboard()
 end
 
+-- Services de l'observatoire. Injectes par build.py, sans code distant ni secret.
+do
+local O={friends={},friendKnown={},watch={},candidates={},bindings={},sessions={},favorites={},publicRows={},publicStatus='Non charge',queue={},queueHistory={},queueStatus='Prete'}
+S.observatory=O
+local job=type(game.JobId)=='string' and game.JobId or ''
+local place=isNum(game.PlaceId) and game.PlaceId or 0
+O.serverKey=tostring(place)..':'..job
+O.plants=Hub.newPlants(O.serverKey)
+local file='blockspin-observatory-v1.json'
+local writable=true
+local started=os.time()
+local sessionId=tostring(started)..'-'..tostring(math.floor(os.clock()*1000))
+local function message(ok,detail)
+    logLine(detail or (ok and 'Operation terminee' or 'Operation impossible'))
+    if S.toast then S.toast(detail or (ok and 'Termine' or 'Impossible'),ok and 'ok' or 'warn') end
+    return ok,detail
+end
+O.message=message
+local function rootPosition()
+    local r=getRoot();local p=r and r.Position
+    return p and {p.X,p.Y,p.Z} or nil
+end
+O.rootPosition=rootPosition
+local function unavailable(detail)
+    O.lastError=tostring(detail):sub(1,300);S.hub:error('Observatoire',O.lastError,os.clock())
+end
+local function readWorkspace()
+    if type(readfile)~='function' or type(isfile)~='function' or not isfile(file) then return true end
+    local ok,value=pcall(function()
+        local raw=readfile(file);assert(type(raw)=='string' and #raw<=262144,'fichier trop grand')
+        local data,err=Hub.validWorkspace(HttpService:JSONDecode(raw));assert(data,err);return data
+    end)
+    if not ok then writable=false;unavailable('Fichier observatoire preserve : '..tostring(value));return false end
+    O.favorites=value.favorites;O.sessions=value.sessions
+    if value.serverKey==O.serverKey and job~='' then
+        for _,v in ipairs(value.plants) do
+            local elapsed=math.max(0,os.time()-v.savedAt)
+            O.plants:observe({serverKey=O.serverKey,id=v.id,crop=v.crop,remaining=math.max(0,v.remaining-elapsed),percent=v.percent,owned=true,position=v.position},os.clock())
+            local p=O.plants.plots[v.id];p.restored=true;p.ready=false
+        end
+    end
+    return true
+end
+readWorkspace()
+function S.saveObservatory()
+    if not writable then return message(false,'Fichier illisible preserve : aucune sauvegarde') end
+    if job=='' or place<1 then return message(false,'Identite serveur indisponible') end
+    if type(writefile)~='function' then return message(false,'Sauvegarde locale indisponible') end
+    local sessions=Hub.copy(O.sessions)
+    local entry={id=sessionId,elapsed=math.max(0,os.clock()-S.hub.started),at=started,place=place,job=job,
+        increases=S.hub.money.observedIncreases,decreases=S.hub.money.observedDecreases}
+    local replaced=false
+    for i,v in ipairs(sessions) do if v.id==sessionId then sessions[i]=entry;replaced=true end end
+    if not replaced then sessions[#sessions+1]=entry end
+    while #sessions>30 do table.remove(sessions,1) end
+    local plants={}
+    for _,v in ipairs(O.plants:rows(os.clock())) do
+        plants[#plants+1]={id=v.id,crop=v.crop,remaining=v.remaining,percent=v.projectedPercent,position=v.position,savedAt=os.time()}
+    end
+    local data={schema=1,serverKey=O.serverKey,favorites=Hub.copy(O.favorites),sessions=sessions,plants=plants}
+    local valid,err=Hub.validWorkspace(data);if not valid then return message(false,err) end
+    local ok,why=pcall(function() local raw=HttpService:JSONEncode(valid);assert(#raw<=262144,'fichier trop grand');writefile(file,raw) end)
+    if ok then O.sessions=sessions else unavailable(why) end
+    return message(ok,ok and 'Favoris, bilan et timers sauvegardes localement' or tostring(why))
+end
+function S.favoriteServer(name,selected)
+    local j,p=job,place
+    if selected then j,p=selected.id,selected.place or place end
+    name=Hub.normalizeName(name)
+    local data={schema=1,serverKey=O.serverKey,favorites={{job=j,place=p,name=name}},sessions={},plants={}}
+    local valid=Hub.validWorkspace(data)
+    if not valid then return false,'Nom ou serveur invalide' end
+    for _,v in ipairs(O.favorites) do if v.job==j and v.place==p then v.name=name;return true,'Favori renomme en memoire' end end
+    if #O.favorites>=30 then return false,'30 favoris maximum' end
+    O.favorites[#O.favorites+1]=valid.favorites[1];return true,'Favori ajoute ; sauvegarder pour conserver'
+end
+function S.removeServerFavorite(index,confirmed)
+    if confirmed~=true or not O.favorites[index] then return false,'Confirmer le favori selectionne' end
+    table.remove(O.favorites,index);return true,'Favori retire en memoire'
+end
+function S.exportSession()
+    local now=os.clock();local snap=S.hub:snapshot(now);local privacy=ui.privacy==true
+    local events={}
+    for _,e in ipairs(S.server.events) do events[#events+1]={kind=e.kind,elapsed=math.max(0,e.at-S.server.started),name=not privacy and e.player.name or nil,id=not privacy and e.player.id or nil} end
+    local payload={schema=1,version=VERSION,elapsed=snap.elapsed,increases=S.hub.money.observedIncreases,decreases=S.hub.money.observedDecreases,
+        sales=S.hub.money.earned,deposited=S.hub.money.deposited,events=events,privacy=privacy,job=not privacy and job or nil,place=not privacy and place or nil}
+    local ok,raw=pcall(function() return HttpService:JSONEncode(payload) end)
+    if not ok then return message(false,'Export JSON impossible') end
+    if type(setclipboard)=='function' then
+        local copied=pcall(setclipboard,raw);if copied then return message(true,'Bilan copie en JSON') end
+    end
+    if type(writefile)=='function' then
+        local wrote=pcall(writefile,'blockspin-session-export.json',raw);return message(wrote,wrote and 'Bilan dans blockspin-session-export.json' or 'Ecriture impossible')
+    end
+    return message(false,'Presse-papiers et fichier indisponibles')
+end
+-- Amitie : requete officielle, une fois par joueur, file sequentielle bornee.
+O.friendQueue={};O.friendPending={}
+function O.queueFriend(p)
+    if not p or p.UserId==player.UserId or O.friendKnown[p.UserId] or O.friendPending[p.UserId] or #O.friendQueue>=100 then return end
+    O.friendPending[p.UserId]=true;O.friendQueue[#O.friendQueue+1]=p.UserId
+end
+function O.presence(kind,id)
+    local p=S.server.players[id]
+    local selected=O.watch[id]==true or (ui.friendAlerts and O.friends[id]==true)
+    if ui.presenceAlerts and selected and S.toast then S.toast(ui.privacy and ('Joueur suivi : '..kind) or ((p and p.display or O.leavingName or 'Joueur')..' : '..kind),'info') end
+end
+pcall(function() for _,p in ipairs(Players:GetPlayers()) do O.queueFriend(p) end end)
+function S.setPublicServerProvider(fn)
+    if fn~=nil and type(fn)~='function' then return false end
+    if O.publicPending then return false end
+    O.publicProvider=fn;O.publicCursor=nil;return true
+end
+function S.fetchPublicServers(nextPage)
+    if O.publicPending then return false,'Recherche deja en cours' end
+    if os.clock()<(O.publicRetryAt or -1) then return false,'Attendre avant une nouvelle recherche' end
+    if place<1 then return false,'PlaceId indisponible' end
+    if nextPage and not O.publicCursor then return false,'Aucune page suivante' end
+    O.publicTicket=(O.publicTicket or 0)+1;local ticket=O.publicTicket
+    O.publicPending=true;O.publicStatus='Chargement';O.publicStarted=os.clock();O.publicRetryAt=os.clock()+5
+    local cursor=nextPage and O.publicCursor or nil
+    task.spawn(function()
+        local ok,payload=pcall(function()
+            if O.publicProvider then return O.publicProvider(place,cursor) end
+            local url='https://games.roblox.com/v1/games/'..string.format('%.0f',place)..'/servers/Public?sortOrder=Asc&limit=100'
+            if cursor then url=url..'&cursor='..HttpService:UrlEncode(cursor) end
+            local raw=HttpService:GetAsync(url)
+            assert(type(raw)=='string' and #raw<=262144,'reponse trop grande')
+            return HttpService:JSONDecode(raw)
+        end)
+        if not S.running or ticket~=O.publicTicket then return end
+        O.publicPending=false
+        if not ok then O.publicStatus='Acces API indisponible';O.lastPublicError=tostring(payload):sub(1,200);return end
+        local rows,c=Hub.validateServers(payload,job,ui.serverMinFree or 1,ui.serverMaxPopulation or 100)
+        if not rows then O.publicStatus='Reponse invalide';O.lastPublicError=c;return end
+        O.publicRows=rows;O.publicCursor=c;O.publicStatus=#rows..' serveurs · instantane';O.publicObserved=os.clock();O.publicSelection=nil
+    end)
+    return true,'Recherche publique demandee'
+end
+function S.prepareServerJoin(row)
+    if type(row)~='table' then return false,'Selectionner un serveur' end
+    local valid=Hub.validWorkspace({schema=1,serverKey='',favorites={{job=row.id,place=row.place or place,name='Selection'}},sessions={},plants={}})
+    if not valid or row.id==job then return false,'Serveur invalide ou deja rejoint' end
+    O.join={id=row.id,place=row.place or place,expires=os.clock()+15};return true,'Confirmer le changement sous 15 secondes'
+end
+function S.confirmServerJoin()
+    local target=O.join;O.join=nil
+    if not target or os.clock()>target.expires then return false,'Selection expiree : choisir a nouveau' end
+    if S.cycleRunning or S.recording or O.queueRunning then return false,'Terminer les activites avant de changer de serveur' end
+    S.cancel()
+    local ok,err=pcall(function() game:GetService('TeleportService'):TeleportToPlaceInstance(target.place,target.id,player) end)
+    if not ok then return false,'Changement refuse : '..tostring(err):sub(1,160) end
+    return true,'Requete envoyee a Roblox ; arrivee non confirmee'
+end
+-- Detection de sources : textes effectivement presents, a la demande seulement.
+local function pathOf(o)
+    local parts={};local q=o
+    while q and q~=pg and q~=workspace do table.insert(parts,1,q.Name);q=q.Parent end
+    if not q then return nil end
+    return {scope=q==pg and 'gui' or 'world',parts=parts}
+end
+local function resolve(path)
+    local q=path and (path.scope=='gui' and pg or workspace)
+    for _,name in ipairs(path and path.parts or {}) do q=q and q:FindFirstChild(name) end
+    return q
+end
+local function readText(o)
+    if not o or not o.Parent or not (o:IsDescendantOf(pg) or o:IsDescendantOf(workspace)) or ours(o) then return nil end
+    if o:IsA('TextLabel') or o:IsA('TextButton') then
+        if o:IsDescendantOf(pg) then if not shown(o) then return nil end
+        else
+            local q=o;local layer=false
+            while q and q~=workspace do
+                if q:IsA('GuiObject') and not q.Visible then return nil end
+                if q:IsA('BillboardGui') or q:IsA('SurfaceGui') then if not q.Enabled then return nil end;layer=true end
+                q=q.Parent
+            end
+            if q~=workspace or not layer then return nil end
+        end
+        return o.Text
+    end
+end
+local function plotPosition(root)
+    local q=root
+    for _=1,8 do
+        if not q or q==pg or q==workspace then break end
+        if q:IsA('BasePart') then local p=q.Position;return {p.X,p.Y,p.Z} end
+        if q:IsA('BillboardGui') or q:IsA('SurfaceGui') then
+            local a=q.Adornee
+            if a and a:IsA('BasePart') then local p=a.Position;return {p.X,p.Y,p.Z} end
+        end
+        q=q.Parent
+    end
+end
+local function plotAnchor(root)
+    local q=root
+    for _=1,8 do
+        if not q or q==pg or q==workspace then return nil end
+        if q:IsA('BasePart') then return q end
+        if (q:IsA('BillboardGui') or q:IsA('SurfaceGui')) and q.Adornee then return q.Adornee end
+        q=q.Parent
+    end
+end
+function S.discoverPlantSources()
+    if O.scanPending then return false,'Recherche deja en cours' end
+    O.scanPending=true;O.candidates={};O.scanStatus='Recherche des temps et pourcentages visibles'
+    task.spawn(function()
+        local ok,err=pcall(function()
+            local groups={};local processed=0
+            for _,scope in ipairs({pg,workspace}) do
+                local stack=scope:GetChildren()
+                while #stack>0 do
+                    if not S.running then return end
+                    local o=table.remove(stack)
+                    if o~=gui and not ours(o) then
+                    processed=processed+1;if processed>15000 then break end
+                    for _,child in ipairs(o:GetChildren()) do stack[#stack+1]=child end
+                    local value=readText(o)
+                    local sec=value and Hub.parseDuration(value);local pct=value and Hub.parsePercent(value)
+                    if sec or pct then
+                        local ancestor=o.Parent
+                        for _=1,2 do
+                            if not ancestor or ancestor==pg or ancestor==workspace then break end
+                            local g=groups[ancestor] or {root=ancestor,timers={},percents={}};groups[ancestor]=g
+                            if sec~=nil then g.timer=o;g.seconds=sec;g.timers[o]=true end
+                            if pct~=nil then g.percent=o;g.pct=pct;g.percents[o]=true end
+                            ancestor=ancestor.Parent
+                        end
+                    end
+                    if processed%300==0 then task.wait() end
+                    end
+                end
+                if processed>15000 then break end
+            end
+            local seen={}
+            for root,g in pairs(groups) do
+                local tc,pc=0,0;for _ in pairs(g.timers) do tc=tc+1 end;for _ in pairs(g.percents) do pc=pc+1 end
+                if tc==1 and pc==1 and not seen[g.timer] and #O.candidates<30 then
+                    seen[g.timer]=true
+                    O.candidates[#O.candidates+1]={root=root,timer=g.timer,percent=g.percent,seconds=g.seconds,pct=g.pct,path=root:GetFullName()}
+                end
+            end
+            table.sort(O.candidates,function(a,b) return a.path<b.path end)
+            O.scanStatus=#O.candidates..' paires visibles · propriete a confirmer'..(processed>15000 and ' · limite atteinte' or '')
+        end)
+        O.scanPending=false
+        if not ok then O.scanStatus='Recherche impossible';unavailable(err) end
+    end)
+    return true,'Recherche lancee ; aucune plantation declenchee'
+end
+local function pollBinding(b)
+    if b.anchor and plotAnchor(b.timer)~=b.anchor then
+        local old=O.plants.plots[b.id];if old then old.missing=true end
+        return false -- un GUI reutilise pour une autre parcelle ne change pas son identite
+    end
+    local t=readText(b.timer);local p=readText(b.percent)
+    local seconds=t and Hub.parseDuration(t);local percent=p and Hub.parsePercent(p)
+    if seconds==nil or percent==nil then
+        local old=O.plants.plots[b.id];if old then old.missing=true end
+        return false
+    end
+    local ok=O.plants:observe({serverKey=O.serverKey,id=b.id,crop=b.crop,owned=true,remaining=seconds,percent=percent,
+        position=plotPosition(b.timer) or b.position,source=b.source},os.clock())
+    return ok
+end
+local function watchBinding(b)
+    for _,c in ipairs(b.connections) do c:Disconnect() end;b.connections={}
+    for _,o in ipairs({b.timer,b.percent}) do
+        b.connections[#b.connections+1]=o:GetPropertyChangedSignal('Text'):Connect(function()
+            if not S.running or b.samplePending then return end
+            b.samplePending=true
+            task.delay(0,function()
+                b.samplePending=false
+                if not S.running or O.bindings[b.id]~=b then return end
+                local ok,err=pcall(pollBinding,b);if not ok then unavailable(err) end
+            end)
+        end)
+    end
+end
+function S.bindPlantSource(index,id,crop,owned)
+    local c=O.candidates[index]
+    id=Hub.normalizeName(id);crop=Hub.normalizeName(crop)
+    if owned~=true or not c or not Hub.validName(id) or not Hub.validName(crop) then return false,'Choisir une paire, nommer la parcelle et confirmer votre propriete' end
+    if O.bindings[id] then return false,'Parcelle deja liee : retirer avant de remplacer' end
+    local count=0;for _ in pairs(O.bindings) do count=count+1 end
+    if count>=50 then return false,'50 liaisons maximum' end
+    local b={id=id,crop=crop,timer=c.timer,percent=c.percent,timePath=pathOf(c.timer),percentPath=pathOf(c.percent),source=c.path,connections={},position=plotPosition(c.timer),anchor=plotAnchor(c.timer)}
+    if not pollBinding(b) then return false,'Les deux valeurs ne sont plus lisibles' end
+    O.bindings[id]=b
+    watchBinding(b)
+    return true,'Parcelle liee : lecture des valeurs reelles, estimation si elles cessent de changer'
+end
+function S.removePlantTracking(id,confirmed)
+    if confirmed~=true then return false,'Confirmer la parcelle selectionnee' end
+    local b=O.bindings[id]
+    if b then for _,c in ipairs(b.connections) do c:Disconnect() end;O.bindings[id]=nil end
+    return O.plants:remove(id,true),'Suivi retire ; aucune recolte declenchee'
+end
+-- Adaptateur de lecture seulement ; son integration BlockSpin reste a caracteriser.
+function S.setPlantObserver(fn)
+    if fn~=nil and type(fn)~='function' then return false end
+    O.plantProvider=fn;return true
+end
+function S.exportPlantDiagnostic()
+    local rows={}
+    for _,v in ipairs(O.candidates) do
+        rows[#rows+1]={root=v.path,timer=v.timer:GetFullName(),timerText=readText(v.timer),percent=v.percent:GetFullName(),percentText=readText(v.percent),position=plotPosition(v.timer)}
+    end
+    local raw=HttpService:JSONEncode({schema=1,version=VERSION,sources=rows,notice='Paires candidates, propriete et identite non deduites'})
+    if type(setclipboard)=='function' then local ok=pcall(setclipboard,raw);return message(ok,ok and 'Diagnostic agricole copie' or 'Copie du diagnostic impossible') end
+    if type(writefile)=='function' then local ok=pcall(writefile,'blockspin-plant-diagnostic.json',raw);return message(ok,ok and 'Diagnostic dans blockspin-plant-diagnostic.json' or 'Ecriture du diagnostic impossible') end
+    return message(false,'Export local indisponible')
+end
+local function pollProvider()
+    if not O.plantProvider or O.plantProviderPending then return end
+    O.plantProviderPending=true;O.plantProviderAt=os.clock();O.plantProviderTicket=(O.plantProviderTicket or 0)+1
+    local ticket=O.plantProviderTicket
+    task.spawn(function()
+        local ok,rows=pcall(O.plantProvider)
+        if not S.running or ticket~=O.plantProviderTicket then return end
+        O.plantProviderPending=false
+        if not ok or type(rows)~='table' or #rows>50 then unavailable('Lecteur agricole : reponse invalide');return end
+        for _,r in ipairs(rows) do
+            if type(r)=='table' and r.state=='removed' then
+                if r.serverKey==O.serverKey and r.owned==true and r.confirmed==true then O.plants:remove(r.id,true) end
+            else local accepted,why=O.plants:observe(r,os.clock());if not accepted then unavailable(why) end end
+        end
+    end)
+end
+function S.addQueueStep(kind,name,timeout)
+    if O.queueRunning then return false,'File en cours' end
+    local rows=Hub.copy(O.queue);rows[#rows+1]={kind=kind,name=name,timeout=timeout}
+    local valid,err=Hub.validateQueue(rows);if not valid then return false,err end
+    if kind=='route' and not S.hub.library.routes[name] then return false,'Destination inconnue' end
+    O.queue=valid;return true,'Etape ajoutee'
+end
+function S.startQueue()
+    if O.queueRunning or S.cycleRunning or S.recording or S.hub.current then return false,'Une activite est deja en cours' end
+    local steps,err=Hub.validateQueue(O.queue);if not steps then return false,err end
+    O.queueTicket=(O.queueTicket or 0)+1;local ticket=O.queueTicket
+    O.queueRunning=true;O.queueStatus='En cours';S.autoCycle=false;S.fishingEnabled=false;S.paused=true
+    task.spawn(function()
+        local completed=true
+        local function valid() return S.running and O.queueTicket==ticket end
+        for i,row in ipairs(steps) do
+            if not valid() then return end
+            O.queueIndex=i;O.queueDeadline=os.clock()+row.timeout
+            local ok,why=true,nil;local tok=S.token;local beforeSales=S.hub.money.sales
+            local watched={}
+            if row.kind=='plants' then for id in pairs(O.plants.plots) do watched[#watched+1]=id end;if #watched==0 then ok=false;why='Aucune plante suivie' end end
+            if row.kind=='cycle' or row.kind=='route' then
+                O.dispatching=true
+                local callOK,a,b=pcall(function() if row.kind=='cycle' then return S.runCycle() end;return S.driveNamedRoute(row.name) end)
+                O.dispatching=false;ok=callOK and a==true;why=b or (not callOK and a or nil);tok=S.token
+            end
+            local proof=false
+            while valid() and ok do
+                if row.kind=='pause' then proof=os.clock()>=O.queueDeadline
+                elseif row.kind=='plants' then
+                    proof=true
+                    for _,id in ipairs(watched) do local p=O.plants.plots[id];if not p or not p.ready or p.missing or p.restored or os.clock()-p.observed>3 then proof=false end end
+                elseif not S.cycleRunning then
+                    proof=row.kind=='route' and S.driver and S.driver.mode=='DONE' or (row.kind=='cycle' and S.lastCycleResult and S.lastCycleResult.token==tok and S.lastCycleResult.ok and S.hub.money.sales>beforeSales)
+                    if not proof then ok=false;why=S.lastRouteError or 'Preuve de fin absente' end
+                end
+                if proof then break end
+                if S.token~=tok then ok=false;why='Activite remplacee ou annulee';break end
+                if os.clock()>=O.queueDeadline then ok=false;why='Delai maximal depasse';break end
+                task.wait(0.1)
+            end
+            if not valid() then return end
+            ok=ok and proof
+            O.queueHistory[#O.queueHistory+1]={kind=row.kind,ok=ok,detail=why or 'Fin verifiee',at=os.clock()}
+            while #O.queueHistory>40 do table.remove(O.queueHistory,1) end
+            if not ok then
+                if S.cycleRunning then cancelAll(why) end
+                O.queueStatus='Interrompue : '..tostring(why);S.hub:error('File',why,os.clock());completed=false;break
+            end
+        end
+        O.queueRunning=false;O.queueDeadline=nil
+        if completed then O.queueStatus='Terminee : preuves verifiees' end
+    end)
+    return true,'File demarree ; aucun redemarrage automatique apres une erreur'
+end
+function O.tick()
+    local now=os.clock()
+    if O.publicPending and now-O.publicStarted>12 then O.publicTicket=O.publicTicket+1;O.publicPending=false;O.publicStatus='Delai API depasse' end
+    if O.plantProviderPending and now-O.plantProviderAt>5 then O.plantProviderTicket=O.plantProviderTicket+1;O.plantProviderPending=false;unavailable('Delai du lecteur agricole depasse') end
+    if now>=(O.nextPlantPoll or 0) then
+        O.nextPlantPoll=now+1
+        for _,b in pairs(O.bindings) do
+            if not b.timer.Parent or not b.percent.Parent then
+                local t,p=resolve(b.timePath),resolve(b.percentPath)
+                if t and p and (t~=b.timer or p~=b.percent) then
+                    b.timer=t;b.percent=p;watchBinding(b)
+                end
+            end
+            local ok,err=pcall(pollBinding,b);if not ok then unavailable(err) end
+        end
+        pollProvider()
+        if ui.plantAlerts then for _,a in ipairs(O.plants:alerts(now,ui.plantAlertSeconds or 60)) do
+            if S.toast then S.toast(a.id..(a.kind=='ready' and ' : maturite observee' or (a.estimated and ' : bientot prete (estime)' or ' : bientot prete')),'info') end
+        end end
+    end
+    if O.friendBusy and now-(O.friendStarted or now)>8 then O.friendTicket=(O.friendTicket or 0)+1;O.friendBusy=false end
+    if not O.friendBusy and #O.friendQueue>0 and now>=(O.friendRetryAt or 0) then
+        O.friendBusy=true;O.friendStarted=now;O.friendRetryAt=now+1.5;O.friendTicket=(O.friendTicket or 0)+1
+        local ticket=O.friendTicket;local id=table.remove(O.friendQueue,1)
+        task.spawn(function()
+            local ok,result=pcall(function() return player:IsFriendsWith(id) end)
+            O.friendPending[id]=nil
+            if not S.running or O.friendTicket~=ticket then return end
+            O.friendKnown[id]=true;if ok then O.friends[id]=result==true end
+            O.friendBusy=false
+        end)
+    end
+end
+function O.cleanup()
+    O.friendTicket=(O.friendTicket or 0)+1
+    O.publicTicket=(O.publicTicket or 0)+1;O.plantProviderTicket=(O.plantProviderTicket or 0)+1;O.queueTicket=(O.queueTicket or 0)+1;O.queueRunning=false
+    for _,b in pairs(O.bindings) do for _,c in ipairs(b.connections) do c:Disconnect() end end
+    O.bindings={}
+end
+end
+
+-- Cartes et controles V1.2, injectes dans la portee du client.
+do
+local D,O=S.design,S.observatory
+local function report(ok,detail) O.message(ok,detail);S.refreshDashboard() end
+local function parent(p) return D.parent(p) end
+local function box(p,name,height)
+    p=parent(p)
+    return make('Frame',{Name=name,BackgroundTransparency=1,Size=UDim2.new(1,0,0,height),LayoutOrder=D.order(p)},p)
+end
+local function txt(p,value,size,color)
+    return make('TextLabel',{BackgroundTransparency=1,Text=value,TextSize=size or 12,Font=Enum.Font.GothamMedium,
+        TextColor3=color or theme.text,TextXAlignment=Enum.TextXAlignment.Left,TextTruncate=Enum.TextTruncate.AtEnd,Size=UDim2.new(1,0,0,24)},p)
+end
+local function timer(n) return Hub.duration(n) end
+local function money(n) return isNum(n) and string.format('%.0f $',n) or 'N/D' end
+local function stamp(t) return os.date('!%H:%M:%S',math.floor(os.time()-math.max(0,os.clock()-t))) end
+local function limited(list,start,count)
+    local rows={};for i=start,math.min(#list,start+count-1) do rows[#rows+1]=list[i] end;return rows
+end
+local function pagination(p,name,step)
+    return grid(p,{{'‹ '..name,function() step(-1) end},{name..' ›',function() step(1) end}},34)
+end
+local function setting(p,label,key)
+    toggle(p,function() return label..' : '..(ui[key] and 'oui' or 'non') end,function() ui[key]=not ui[key];saveSettings();D.refresh() end)
+end
+local function badgeList(id,p,limit,empty) return D.rowList(p,id,limit,empty) end
+-- Serveur : enrichit le moniteur de presence existant, sans second comptage.
+do
+local p=pages.Server
+section(p,'Connexion & session')
+D.metricsGrid(p,{{id='serverElapsed',label='VOTRE SESSION'},{id='serverFree',label='PLACES LIBRES'},{id='pingMean',label='PING MOYEN'},{id='pingPeak',label='PIC DE PING'}})
+D.detail(p,'pingRange','Minimum / médiane','N/D')
+D.caption(p,'Durée depuis l’ouverture du hub · historique du ping sur 30 mesures')
+D.chart(p,'serverPingChart','Votre connexion')
+section(p,'Recherche & joueurs suivis')
+local search=textbox(p,'Rechercher un pseudo / username')
+connect(search:GetPropertyChangedSignal('Text'),function() O.rosterSearch=search.Text:sub(1,64);D.rosterPage=1 end)
+O.rosterOrder='name'
+toggle(p,function() return 'Tri des joueurs : '..O.rosterOrder end,function() local nextOrder={name='recent',recent='friends',friends='name'};O.rosterOrder=nextOrder[O.rosterOrder];D.rosterPage=1 end)
+setting(p,'Alertes de présence','presenceAlerts');setting(p,'Inclure les amis connus','friendAlerts')
+D.caption(p,'Clique un joueur dans la liste pour activer ou retirer son suivi de session.')
+D.lists.serverRoster.onSelect=function(row)
+    if row.id and row.id~=player.UserId then O.watch[row.id]=not O.watch[row.id];report(true,O.watch[row.id] and 'Joueur suivi pour cette session' or 'Suivi retire') end
+end
+section(p,'Fil des événements')
+O.eventKind='all';O.eventPage=1
+toggle(p,function() return 'Événements : '..O.eventKind end,function() local n={all='join',join='leave',leave='all'};O.eventKind=n[O.eventKind];O.eventPage=1 end)
+badgeList('serverTimeline',p,8,'Aucun événement depuis l’ouverture')
+pagination(p,'Événements',function(n) O.eventPage=math.max(1,(O.eventPage or 1)+n);D.refresh() end)
+D.detail(p,'timelinePage','Page','1 / 1')
+section(p,'Favoris & bilan local')
+local favoriteName=textbox(p,'Nom du serveur favori')
+button(p,'Ajouter ce serveur aux favoris',function() report(S.favoriteServer(favoriteName.Text)) end)
+badgeList('serverFavorites',p,6,'Aucun favori enregistré').onSelect=function(row)
+    O.favoriteSelection=row.index;local v=O.favorites[row.index];if v then favoriteName.Text=v.name;report(S.prepareServerJoin({id=v.job,place=v.place})) end
+end
+O.favoritePage=1
+pagination(p,'Favoris',function(n) O.favoritePage=math.max(1,O.favoritePage+n);D.refresh() end)
+button(p,'Retirer le favori sélectionné (confirmer)',function() report(S.removeServerFavorite(O.favoriteSelection,true));O.favoriteSelection=nil end)
+button(p,'Sauvegarder favoris / session / timers',function() S.saveObservatory() end)
+button(p,'Exporter le bilan de session',function() S.exportSession() end)
+badgeList('serverSessions',p,6,'Aucun bilan sauvegardé')
+O.sessionPage=1
+pagination(p,'Bilans',function(n) O.sessionPage=math.max(1,O.sessionPage+n);D.refresh() end)
+D.caption(p,'Sauvegarde locale explicite · 30 bilans maximum · aucun envoi à un tiers')
+section(p,'Serveurs publics')
+D.badge(p,'publicStatus','Disponibilité','Non chargé')
+D.caption(p,'Instantanés publics ; disponibilité à revérifier par Roblox au moment de rejoindre.')
+local freeBox=textbox(p,'Places libres minimum (0–100)');freeBox.Text=tostring(ui.serverMinFree)
+local populationBox=textbox(p,'Population maximum (1–200)');populationBox.Text=tostring(ui.serverMaxPopulation)
+button(p,'Appliquer les filtres serveurs',function()
+    local free,max=tonumber(freeBox.Text),tonumber(populationBox.Text)
+    if not isNum(free) or free%1~=0 or free<0 or free>100 or not isNum(max) or max%1~=0 or max<1 or max>200 then report(false,'Filtres invalides');return end
+    ui.serverMinFree=free;ui.serverMaxPopulation=max;saveSettings();O.publicRows={};O.publicCursor=nil;O.publicStatus='Filtres appliques : actualiser';O.publicPage=1
+end)
+grid(p,{{'Actualiser les serveurs publics',function() O.publicPage=1;report(S.fetchPublicServers(false)) end},{'Page API suivante',function() O.publicPage=1;report(S.fetchPublicServers(true)) end}})
+badgeList('publicServers',p,6,'Aucun serveur public chargé').onSelect=function(row) O.publicSelection=row.server;report(S.prepareServerJoin(row.server)) end
+O.publicPage=1
+pagination(p,'Liste publique',function(n) O.publicPage=math.max(1,O.publicPage+n);D.refresh() end)
+button(p,'Ajouter le serveur public sélectionné aux favoris',function() if not O.publicSelection then report(false,'Choisir un serveur public');return end;report(S.favoriteServer(favoriteName.Text,O.publicSelection)) end)
+D.badge(p,'joinTarget','Changement de serveur','Aucune sélection')
+button(p,'Confirmer rejoindre le serveur sélectionné',function() report(S.confirmServerJoin()) end)
+-- Le rendu normal conserve les listes historiques ; recherche et confidentialite s'y appliquent ensuite.
+local original=D.refreshServer
+function D.refreshServer()
+    original()
+    local now=os.clock();local rows={};local roster=Hub.filterRoster(S.server,O.rosterSearch,O.rosterOrder,O.friends)
+    local total=math.max(1,math.ceil(#roster/8));D.rosterPage=clamp(D.rosterPage,1,total)
+    for i=(D.rosterPage-1)*8+1,math.min(#roster,D.rosterPage*8) do
+        local v=roster[i]
+        rows[#rows+1]={id=v.id,title=ui.privacy and 'Joueur '..i or v.display,sub=ui.privacy and 'Identité masquée' or '@'..v.name,
+            avatarId=not ui.privacy and v.id or nil,badge=v.id==player.UserId and 'VOUS' or (O.watch[v.id] and 'SUIVI' or (O.friends[v.id] and 'AMI' or 'PRÉSENT'))}
+    end
+    D.lists.serverRoster:set(rows);D.value('rosterPage',D.rosterPage..' / '..total)
+    if ui.privacy then
+        for _,key in ipairs({'serverJoins','serverLeaves'}) do
+            rows={};for i,v in ipairs(S.server:recent(key=='serverJoins' and 'join' or 'leave',6)) do rows[#rows+1]={title='Joueur',sub='Identité masquée',badge=timer(now-v.at)} end;D.lists[key]:set(rows)
+        end
+    end
+    rows={}
+    for i=#S.server.events,1,-1 do
+        local e=S.server.events[i]
+        if O.eventKind=='all' or e.kind==O.eventKind then
+            rows[#rows+1]={title=(ui.privacy and 'Joueur' or e.player.display)..(e.kind=='join' and ' · arrivée' or ' · départ'),
+                sub=stamp(e.at)..' UTC'..(e.kind=='leave' and (' · présence observée '..timer(e.at-e.player.observed)) or ''),badge=timer(now-e.at)}
+        end
+    end
+    local count=math.max(1,math.ceil(#rows/8));O.eventPage=clamp(O.eventPage,1,count)
+    D.lists.serverTimeline:set(limited(rows,(O.eventPage-1)*8+1,8));D.value('timelinePage',O.eventPage..' / '..count)
+    local stats=Hub.pingSummary(D.charts.ping.values)
+    D.value('pingMean',stats.mean and string.format('%.0f ms',stats.mean) or 'N/D');D.value('pingPeak',stats.max and string.format('%.0f ms',stats.max) or 'N/D')
+    D.value('pingRange',stats.min and string.format('%.0f / %.0f ms',stats.min,stats.median) or 'N/D')
+    D.value('serverElapsed',timer(now-S.server.started));D.value('serverFree',S.server.maxPlayers and math.max(0,S.server.maxPlayers-S.server.count) or 'N/D')
+    D.value('serverJob',ui.privacy and 'Masqué' or game.JobId)
+    rows={};for i,v in ipairs(O.favorites) do rows[#rows+1]={index=i,title=ui.privacy and 'Serveur favori '..i or v.name,sub=ui.privacy and 'Identifiant masqué' or v.job,badge='CHOISIR'} end
+    O.favoritePage=clamp(O.favoritePage,1,math.max(1,math.ceil(#rows/6)));D.lists.serverFavorites:set(limited(rows,(O.favoritePage-1)*6+1,6))
+    rows={};for i=#O.sessions,1,-1 do local v=O.sessions[i];rows[#rows+1]={title=os.date('!%d/%m %H:%M',v.at)..' UTC',sub=timer(v.elapsed)..' · hausses '..money(v.increases),badge='LOCAL'} end
+    O.sessionPage=clamp(O.sessionPage,1,math.max(1,math.ceil(#rows/6)));D.lists.serverSessions:set(limited(rows,(O.sessionPage-1)*6+1,6))
+    rows={};for i,v in ipairs(O.publicRows) do rows[#rows+1]={server=v,title=ui.privacy and 'Serveur public '..i or v.id,sub=v.playing..' / '..v.maxPlayers..' joueurs',badge=(v.maxPlayers-v.playing)..' libres'} end
+    O.publicPage=clamp(O.publicPage,1,math.max(1,math.ceil(#rows/6)));D.lists.publicServers:set(limited(rows,(O.publicPage-1)*6+1,6))
+    D.value('publicStatus',O.publicStatus);D.value('joinTarget',O.join and now<=O.join.expires and (ui.privacy and 'Sélection masquée · confirmer' or O.join.id) or 'Aucune sélection')
+end
+end
+-- Cartes de plantation : pool borne, pourcentage et echeance toujours distingues.
+do
+local p=pages.Farming
+section(p,'Mes plantations suivies')
+D.metricsGrid(p,{{id='trackedPlants',label='PARCELLES SUIVIES'},{id='readyPlants',label='MATURITÉS OBSERVÉES'}})
+D.badge(p,'plantObserver','Lecture agricole','À relier')
+D.caption(p,'Suivi à distance sur la map · un timer projeté reste marqué estimé')
+local root=box(p,'PlantCards',48)
+local empty=txt(root,'Aucune parcelle liée pour le moment',12,theme.muted)
+local pool={}
+for i=1,6 do
+    local c=make('TextButton',{Name='PlantCard'..i,Text='',BackgroundColor3=theme.control,BorderSizePixel=0,Size=UDim2.new(1,0,0,116),Position=UDim2.fromOffset(0,(i-1)*124),Visible=false},root);round(c,10);outline(c)
+    local icon=make('Frame',{BackgroundTransparency=1,Size=UDim2.fromOffset(28,30),Position=UDim2.fromOffset(12,12)},c)
+    local stem=make('Frame',{BackgroundColor3=Color3.fromRGB(125,210,154),BorderSizePixel=0,Size=UDim2.fromOffset(3,23),Position=UDim2.fromOffset(12,6)},icon);round(stem,2)
+    for _,r in ipairs({-35,35}) do local leaf=make('Frame',{BackgroundColor3=Color3.fromRGB(125,210,154),BorderSizePixel=0,Rotation=r,Size=UDim2.fromOffset(15,6),Position=UDim2.fromOffset(r<0 and 1 or 12,8)},icon);round(leaf,4) end
+    local title=txt(c,'',13);title.Position=UDim2.fromOffset(52,10);title.Size=UDim2.new(1,-64,0,22)
+    local time=txt(c,'',24);time.Position=UDim2.fromOffset(14,40);time.Size=UDim2.new(0.55,-14,0,30)
+    local pct=txt(c,'',13,theme.muted);pct.Position=UDim2.new(0.55,0,0,43);pct.Size=UDim2.new(0.45,-14,0,24);pct.TextXAlignment=Enum.TextXAlignment.Right
+    local track=make('Frame',{BackgroundColor3=theme.border,BorderSizePixel=0,Size=UDim2.new(1,-28,0,4),Position=UDim2.fromOffset(14,79)},c);round(track,2)
+    local fill=make('Frame',{BackgroundColor3=theme.accent,BorderSizePixel=0,Size=UDim2.fromScale(0,1)},track);round(fill,2);D.bind(fill,'BackgroundColor3')
+    local status=txt(c,'',9,theme.muted);status.Position=UDim2.fromOffset(14,88);status.Size=UDim2.new(1,-28,0,20)
+    pool[i]={root=c,title=title,time=time,pct=pct,fill=fill,status=status}
+    connect(c.Activated,function() if O.visiblePlants and O.visiblePlants[i] then O.plantSelection=O.visiblePlants[i].id end end)
+end
+O.plantPage=1
+pagination(p,'Plantations',function(n) O.plantPage=math.max(1,O.plantPage+n);D.refresh() end)
+setting(p,'Grouper par type de plante','plantGrouping');setting(p,'Alertes de récolte','plantAlerts')
+local threshold=textbox(p,'Alerte avant maturité en secondes (10–600)');threshold.Text=tostring(ui.plantAlertSeconds)
+button(p,'Appliquer le délai des alertes',function() local n=tonumber(threshold.Text);if not isNum(n) or n<10 or n>600 then report(false,'Choisir 10 à 600 secondes');return end;ui.plantAlertSeconds=math.floor(n);saveSettings() end)
+button(p,'Retirer le suivi sélectionné (confirmer)',function() report(S.removePlantTracking(O.plantSelection,true));O.plantSelection=nil end)
+section(p,'Relier mes affichages de croissance')
+D.caption(p,'Près de vos plantes, rechercher leurs temps et pourcentages réellement affichés.')
+button(p,'Rechercher les affichages temps / pourcentage',function() report(S.discoverPlantSources()) end)
+button(p,'Exporter le diagnostic agricole',function() S.exportPlantDiagnostic() end)
+D.detail(p,'plantScanStatus','Sources visibles','Non recherché')
+badgeList('plantSources',p,6,'Aucune paire temps / pourcentage trouvée').onSelect=function(row) O.plantSourceSelection=row.index end
+O.sourcePage=1
+pagination(p,'Sources agricoles',function(n) O.sourcePage=math.max(1,O.sourcePage+n);D.refresh() end)
+local id=textbox(p,'Nom unique de ma parcelle');local crop=textbox(p,'Type de ma plante')
+button(p,'Lier la source choisie à ma parcelle (je confirme)',function() report(S.bindPlantSource(O.plantSourceSelection,id.Text,crop.Text,true)) end)
+D.caption(p,'Cette confirmation identifie votre parcelle ; elle ne plante et ne récolte rien.')
+function O.refreshPlants()
+    local now=os.clock();local rows=O.plants:rows(now,O.rootPosition(),ui.plantGrouping);local ready=0
+    for _,v in ipairs(rows) do if v.ready and not v.estimated then ready=ready+1 end end
+    D.value('trackedPlants',#rows);D.value('readyPlants',ready);D.value('plantObserver',O.plantProvider and 'Lecteur configuré' or (next(O.bindings) and 'Affichages liés' or 'À relier'))
+    O.plantPage=clamp(O.plantPage,1,math.max(1,math.ceil(#rows/6)));O.visiblePlants=limited(rows,(O.plantPage-1)*6+1,6)
+    empty.Visible=#rows==0;root.Size=UDim2.new(1,0,0,#rows==0 and 48 or #O.visiblePlants*124-8)
+    for i,c in ipairs(pool) do
+        local v=O.visiblePlants[i];c.root.Visible=v~=nil
+        if v then
+            c.title.Text=v.crop..' · '..v.id;c.time.Text=v.ready and not v.estimated and 'Prête' or (v.remaining==0 and 'À vérifier' or timer(v.remaining))
+            c.pct.Text=string.format('%s%.0f %%',v.estimated and '~ ' or '',v.estimated and v.projectedPercent or v.percent)
+            D.animate(c.fill,0.3,{Size=UDim2.fromScale((v.estimated and v.projectedPercent or v.percent)/100,1)})
+            c.status.Text=v.status..' · lecture il y a '..timer(v.age)..(v.distance and string.format(' · %.0f studs',v.distance) or '')
+            c.root.BackgroundColor3=O.plantSelection==v.id and theme.surface or theme.control
+        end
+    end
+    rows={};for i,v in ipairs(O.candidates) do rows[#rows+1]={index=i,title=timer(v.seconds)..' · '..v.pct..' %',sub=v.path,badge=O.plantSourceSelection==i and 'CHOISI' or 'CHOISIR'} end
+    O.sourcePage=clamp(O.sourcePage,1,math.max(1,math.ceil(#rows/6)));D.lists.plantSources:set(limited(rows,(O.sourcePage-1)*6+1,6));D.value('plantScanStatus',O.scanStatus or 'Non recherché')
+end
+end
+-- Apercu top-down des seules donnees enregistrees par l'utilisateur.
+do
+local p=pages.Vehicle
+section(p,'Carte de mes repères')
+D.caption(p,'Vue X/Z de vos spots, parcelles liées et trajet sélectionné · aucune téléportation')
+local root=box(p,'RecordedMap',250);root.BackgroundColor3=theme.background;round(root,9);outline(root)
+local status=txt(root,'Choisir un trajet ou un repère',10,theme.muted);status.Position=UDim2.fromOffset(12,220);status.Size=UDim2.new(1,-24,0,26)
+local plot=make('Frame',{Name='MapPlot',BackgroundTransparency=1,ClipsDescendants=true,Position=UDim2.fromOffset(12,12),Size=UDim2.new(1,-24,1,-50)},root)
+for i=1,4 do make('Frame',{BackgroundColor3=theme.border,BackgroundTransparency=0.5,BorderSizePixel=0,Size=UDim2.new(1,0,0,1),Position=UDim2.fromScale(0,i/5)},plot) end
+local marks={};for i=1,101 do
+    local b=make('TextButton',{Name='MapMarker',Text='•',TextSize=24,Font=Enum.Font.GothamBold,TextColor3=theme.accent,BackgroundTransparency=1,Size=UDim2.fromOffset(24,24),AnchorPoint=Vector2.new(0.5,0.5),Visible=false},plot)
+    marks[i]=b
+    connect(b.Activated,function()
+        local r=O.mapRows and O.mapRows[i];if not r then return end
+        status.Text=r.title
+        if r.kind=='spot' then report(S.selectSpot(r.title)) elseif r.kind=='plant' then O.plantSelection=r.title end
+    end)
+end
+local dots={};for i=1,160 do dots[i]=make('Frame',{Name='RoutePoint',BorderSizePixel=0,BackgroundColor3=theme.accent,Size=UDim2.fromOffset(3,3),Visible=false},plot);round(dots[i],2);D.bind(dots[i],'BackgroundColor3') end
+local routeBox=textbox(p,'Destination à prévisualiser')
+button(p,'Afficher ce trajet sur la carte',function() local n=Hub.normalizeName(routeBox.Text);if not S.hub.library.routes[n] then report(false,'Destination inconnue');return end;O.mapRoute=n;status.Text=n;D.refresh() end)
+function O.refreshMap()
+    local rows,route={},S.hub.library.routes[O.mapRoute] or {}
+    for n,v in pairs(S.hub.library.spots) do rows[#rows+1]={kind='spot',title=n,x=v.cf[1],z=v.cf[3]} end
+    for n,v in pairs(O.plants.plots) do if v.position then rows[#rows+1]={kind='plant',title=n,x=v.position[1],z=v.position[3]} end end
+    table.sort(rows,function(a,b) return a.kind==b.kind and a.title<b.title or a.kind<b.kind end)
+    local pos=O.rootPosition();if pos then rows[#rows+1]={kind='self',title='Vous',x=pos[1],z=pos[3]} end
+    local minx,maxx,minz,maxz=math.huge,-math.huge,math.huge,-math.huge
+    local function bound(x,z) minx=math.min(minx,x);maxx=math.max(maxx,x);minz=math.min(minz,z);maxz=math.max(maxz,z) end
+    for _,v in ipairs(rows) do bound(v.x,v.z) end;for _,v in ipairs(route) do bound(v[1],v[3]) end
+    local span=math.max(20,maxx-minx,maxz-minz);local function point(x,z) return UDim2.fromScale(0.08+(x-minx)/span*0.84,0.08+(z-minz)/span*0.84) end
+    O.mapRows=rows
+    for i,b in ipairs(marks) do local r=rows[i];b.Visible=r~=nil;if r then b.Position=point(r.x,r.z);b.Text=r.kind=='self' and '◇' or (r.kind=='plant' and '♧' or '•');b.TextColor3=r.kind=='self' and theme.text or theme.accent end end
+    local count=math.min(160,#route)
+    for i,d in ipairs(dots) do d.Visible=i<=count;if i<=count then local index=count==1 and 1 or math.floor((i-1)*(#route-1)/(count-1))+1;d.Position=point(route[index][1],route[index][3]) end end
+end
+end
+-- File d'activites : etapes verifiees, aucun auto-retry non borne.
+do
+local p=pages.Statistics
+section(p,'File d’activités')
+D.badge(p,'queueStatus','État de la file','Prête');D.gauge(p,'queueRemaining','Délai de l’étape')
+local destination=textbox(p,'Destination pour une étape de conduite')
+local timeout=textbox(p,'Délai maximal en secondes (1–1800)');timeout.Text='600'
+local function append(kind) report(S.addQueueStep(kind,destination.Text,tonumber(timeout.Text))) end
+grid(p,{{'Ajouter un trajet',function() append('route') end},{'Ajouter vente / ATM / retour',function() append('cycle') end},{'Attendre mes plantes prêtes',function() append('plants') end},{'Ajouter une pause',function() append('pause') end}})
+badgeList('automationQueue',p,6,'Aucune étape préparée')
+O.queuePage=1
+pagination(p,'Étapes',function(n) O.queuePage=math.max(1,O.queuePage+n);D.refresh() end)
+grid(p,{{'Démarrer la file',function() report(S.startQueue()) end},{'Arrêter la file',S.cancel},{'Retirer la dernière étape',function() if O.queueRunning then report(false,'Arrêter la file avant de modifier');return end;table.remove(O.queue) end}})
+section(p,'Étapes & preuves')
+D.detail(p,'stepName','Étape active','Aucune');D.detail(p,'stepRemaining','Délai restant','—')
+badgeList('stepHistory',p,6,'Aucune étape exécutée')
+badgeList('queueHistory',p,6,'Aucune étape de file terminée')
+D.metricsGrid(p,{{id='observedNet',label='VARIATION NETTE OBSERVÉE'},{id='observedGross',label='HAUSSES DU COMPTEUR'}})
+D.caption(p,'Variation nette = hausses − baisses observées ; ce n’est pas un bénéfice commercial.')
+end
+-- Reglages : themes nommes, import/export JSON et organisation des cartes.
+do
+local p=pages.Settings
+section(p,'Mes couleurs & thèmes')
+local themeName=textbox(p,'Nom du thème couleur')
+local themeList=badgeList('savedThemes',p,6,'Aucun thème couleur sauvegardé')
+O.themePage=1
+pagination(p,'Thèmes couleur',function(n) O.themePage=math.max(1,O.themePage+n);D.refresh() end)
+themeList.onSelect=function(row) themeName.Text=row.title;ui.accent=row.hex;S.applyAccent(row.hex);D.picker.sync(row.hex);saveSettings() end
+grid(p,{{'Enregistrer mon thème couleur',function()
+    local n=Hub.normalizeName(themeName.Text);if not Hub.validName(n) then report(false,'Nom de thème invalide');return end
+    local count=0;for _ in pairs(ui.savedThemes) do count=count+1 end;if not ui.savedThemes[n] and count>=12 then report(false,'12 thèmes maximum');return end
+    ui.savedThemes[n]=ui.accent;saveSettings();D.refresh()
+end},{'Retirer ce thème couleur (confirmer)',function() local n=Hub.normalizeName(themeName.Text);if n then ui.savedThemes[n]=nil;saveSettings() end end}})
+badgeList('recentColors',p,8,'Aucune couleur récente').onSelect=function(row) ui.accent=row.hex;S.applyAccent(row.hex);D.picker.sync(row.hex);saveSettings() end
+section(p,'Confidentialité & mini-dashboard')
+setting(p,'Masquer les identités affichées','privacy');setting(p,'Mini-dashboard flottant','miniDashboard')
+D.caption(p,'Le mode confidentialité masque aussi les identités dans les exports de session.')
+section(p,'Organisation des cartes')
+D.protectedCards=D.protectedCards or {};D.protectedCards[D.pages[p].current]=true
+O.layoutPage='Statistics';O.layoutListPage=1
+toggle(p,function() return 'Page à personnaliser : '..O.layoutPage end,function()
+    local names={'Statistics','Server','Farming','Fishing','Vehicle','Money','Settings'};for i,n in ipairs(names) do if n==O.layoutPage then O.layoutPage=names[i%#names+1];break end end;O.layoutListPage=1
+end)
+badgeList('layoutCards',p,6,'Aucune carte').onSelect=function(row) O.cardSelection=row.key;D.value('selectedCard',row.title) end
+pagination(p,'Cartes',function(n) O.layoutListPage=math.max(1,O.layoutListPage+n);D.refresh() end)
+D.detail(p,'selectedCard','Carte sélectionnée','Aucune')
+function S.configureCard(key,change)
+    local selected,index,meta
+    for _,m in pairs(D.pages) do for i,c in ipairs(m.cards) do if D.cardKeys[c]==key then selected=c;index=i;meta=m end end end
+    if not selected or type(change)~='table' then return false,'Carte inconnue' end
+    local value=Hub.copy(ui.cardLayouts[key] or {rank=index,hidden=false,wide=false})
+    if change.hidden~=nil then if D.protectedCards[selected] then return false,'Cette carte garde les reglages accessibles' end;value.hidden=change.hidden==true end
+    if change.wide~=nil then value.wide=change.wide==true end
+    if change.direction then
+        local ordered={};for i,c in ipairs(meta.cards) do ordered[#ordered+1]={key=D.cardKeys[c],index=i} end
+        table.sort(ordered,function(a,b) local x,y=ui.cardLayouts[a.key],ui.cardLayouts[b.key];local ar,br=x and x.rank or a.index,y and y.rank or b.index;return ar==br and a.index<b.index or ar<br end)
+        local position;for i,v in ipairs(ordered) do if v.key==key then position=i end end
+        local target=clamp(position+(change.direction<0 and -1 or 1),1,#ordered);ordered[position],ordered[target]=ordered[target],ordered[position]
+        for i,v in ipairs(ordered) do local old=ui.cardLayouts[v.key] or {hidden=false,wide=false};old.rank=i;ui.cardLayouts[v.key]=old;if v.key==key then value.rank=i end end
+    end
+    ui.cardLayouts[key]=value;saveSettings();D.layout();return true,'Organisation enregistree'
+end
+grid(p,{{'Monter la carte',function() report(S.configureCard(O.cardSelection,{direction=-1})) end},{'Descendre la carte',function() report(S.configureCard(O.cardSelection,{direction=1})) end},{'Masquer / afficher la carte',function() local v=ui.cardLayouts[O.cardSelection] or {};report(S.configureCard(O.cardSelection,{hidden=not v.hidden})) end},{'Largeur simple / complète',function() local v=ui.cardLayouts[O.cardSelection] or {};report(S.configureCard(O.cardSelection,{wide=not v.wide})) end}})
+button(p,'Réinitialiser uniquement la disposition des cartes',function() ui.cardLayouts={};saveSettings();D.layout() end)
+section(p,'Transférer mes réglages')
+local importBox=textbox(p,'Coller ici un export JSON de réglages')
+button(p,'Exporter mes réglages en JSON',function()
+    local prefs={};for _,k in ipairs(PREF_KEYS) do prefs[k]=Hub.copy(ui[k]) end
+    -- Source GUI locale omise : un autre joueur peut avoir une hierarchie differente.
+    prefs.moneySourcePath=nil
+    local raw=HttpService:JSONEncode({schema=1,prefs=prefs})
+    if type(setclipboard)=='function' then report(pcall(setclipboard,raw),'Export des reglages vers le presse-papiers') else importBox.Text=raw;report(true,'Export affiche dans le champ JSON') end
+end)
+button(p,'Importer les réglages JSON (appliquer)',function()
+    local raw=importBox.Text
+    if #raw>32768 then report(false,'Export trop grand');return end
+    local ok,data=pcall(function() return HttpService:JSONDecode(raw) end)
+    if not ok or type(data)~='table' or data.schema~=1 or type(data.prefs)~='table' then report(false,'JSON de reglages invalide');return end
+    local allowed={};for _,k in ipairs(PREF_KEYS) do if k~='moneySourcePath' then allowed[k]=data.prefs[k] end end
+    readPrefs(allowed,ui);applyPrefs();saveSettings();report(true,'Reglages reconnus appliques ; aucune activite lancee')
+end)
+button(p,'Restaurer l’apparence par défaut',function()
+    ui.accent='FF475C';ui.scale=1;ui.density='normal';ui.animations=true;ui.cardLayouts={};ui.size={x=960,y=640};ui.position=nil
+    applyPrefs();saveSettings();report(true,'Apparence restauree ; bibliotheque et observations conservees')
+end)
+section(p,'Sources & connexions')
+for _,v in ipairs({{'diagMoney','Portefeuille'},{'diagAim','Visée de pêche'},{'diagPlant','Suivi des plantes'},{'diagFarm','Actions agricoles'},{'diagPublic','Liste de serveurs'},{'diagFiles','Sauvegarde locale'}}) do D.badge(p,v[1],v[2],'À vérifier') end
+D.caption(p,'Les branchements et validations restant à faire sont détaillés dans CONFIGURATION.md du dépôt.')
+end
+-- Les cartes de suivi passent avant les actions agricoles non configurees.
+do
+    local meta=D.pages[pages.Farming]
+    if #meta.cards==3 then meta.cards={meta.cards[2],meta.cards[3],meta.cards[1]} end
+end
+-- Mini-dashboard : deplacable, STOP propre, aucune nouvelle touche clavier.
+do
+local mini=make('Frame',{Name='MiniDashboard',BackgroundColor3=theme.background,BorderSizePixel=0,Size=UDim2.fromOffset(248,160),Position=UDim2.new(1,-270,0,120),Visible=ui.miniDashboard,Active=true,ZIndex=18},gui);round(mini,12);outline(mini)
+local heading=txt(mini,'SESSION EN DIRECT',10,theme.muted);heading.Position=UDim2.fromOffset(14,8);heading.Size=UDim2.new(1,-28,0,22)
+local activity=txt(mini,'Prêt',16);activity.Position=UDim2.fromOffset(14,34);activity.Size=UDim2.new(1,-28,0,24)
+local gains=txt(mini,'',11,theme.muted);gains.Position=UDim2.fromOffset(14,64);gains.Size=UDim2.new(1,-28,0,20)
+local plant=txt(mini,'',11,theme.muted);plant.Position=UDim2.fromOffset(14,87);plant.Size=UDim2.new(1,-28,0,20)
+local stop=button(mini,'STOP',S.cancel,30);stop.Position=UDim2.fromOffset(14,118);stop.Size=UDim2.fromOffset(100,30);stop.BackgroundColor3=theme.danger
+local open=button(mini,'Ouvrir le hub',function() S.setMenuVisible(true) end,30);open.Position=UDim2.fromOffset(122,118);open.Size=UDim2.fromOffset(112,30)
+local drag
+connect(mini.InputBegan,function(input) if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then drag={input=input,start=input.Position,pos=mini.AbsolutePosition or Vector2.new(0,0)} end end)
+connect(UIS.InputChanged,function(input)
+    if not drag then return end
+    if drag.input.UserInputType==Enum.UserInputType.Touch and input~=drag.input then return end
+    if drag.input.UserInputType~=Enum.UserInputType.Touch and input.UserInputType~=Enum.UserInputType.MouseMovement then return end
+    local v=viewportSize();mini.Position=UDim2.fromOffset(clamp(drag.pos.X+input.Position.X-drag.start.X,0,math.max(0,v.X-248)),clamp(drag.pos.Y+input.Position.Y-drag.start.Y,0,math.max(0,v.Y-160)))
+end)
+connect(UIS.InputEnded,function(input) if drag and (input==drag.input or input.UserInputType==Enum.UserInputType.MouseButton1) then drag=nil end end)
+connect(UIS.WindowFocusReleased,function() drag=nil end)
+function O.refreshMini()
+    mini.Visible=ui.miniDashboard;activity.Text=D.stateText(S.state,'')
+    local m=S.hub.money;gains.Text=timer(os.clock()-S.hub.started)..' · hausses '..money(m.observedIncreases)
+    local rows=O.plants:rows(os.clock());local first=rows[1]
+    plant.Text=first and (first.id..' · '..timer(first.remaining)..(first.estimated and ' estimé' or ' observé')) or 'Aucune plantation suivie'
+end
+end
+function D.refreshInsights()
+    O.refreshPlants();O.refreshMap();O.refreshMini()
+    local now=os.clock();local rows={}
+    for i,v in ipairs(O.queue) do rows[#rows+1]={title=i..' · '..v.kind,sub=v.name or 'Étape vérifiée',badge=O.queueRunning and O.queueIndex==i and 'EN COURS' or timer(v.timeout)} end
+    O.queuePage=clamp(O.queuePage,1,math.max(1,math.ceil(#rows/6)));D.lists.automationQueue:set(limited(rows,(O.queuePage-1)*6+1,6))
+    D.value('queueStatus',O.queueStatus)
+    local current=O.queueRunning and O.queue[O.queueIndex]
+    local remaining=O.queueDeadline and math.max(0,O.queueDeadline-now) or 0
+    D.setGauge('queueRemaining',current and timer(remaining) or 'Aucune étape active',current and remaining/current.timeout or 0)
+    local step=S.hub.current;D.value('stepName',step and step.name or 'Aucune');D.value('stepRemaining',step and timer(step.deadline-now) or '—')
+    rows={};for i=#S.hub.history,math.max(1,#S.hub.history-5),-1 do local v=S.hub.history[i];rows[#rows+1]={title=v.name,sub=v.detail,badge=v.ok and 'VÉRIFIÉ' or 'ÉCHEC'} end;D.lists.stepHistory:set(rows)
+    rows={};for i=#O.queueHistory,math.max(1,#O.queueHistory-5),-1 do local v=O.queueHistory[i];rows[#rows+1]={title=v.kind,sub=v.detail,badge=v.ok and 'VÉRIFIÉ' or 'ÉCHEC'} end;D.lists.queueHistory:set(rows)
+    D.value('observedNet',money(S.hub.money.observedIncreases-S.hub.money.observedDecreases));D.value('observedGross',money(S.hub.money.observedIncreases))
+    rows={};for n,h in pairs(ui.savedThemes) do rows[#rows+1]={title=n,sub='#'..h,hex=h,badge='APPLIQUER'} end;table.sort(rows,function(a,b) return a.title<b.title end)
+    O.themePage=clamp(O.themePage,1,math.max(1,math.ceil(#rows/6)));D.lists.savedThemes:set(limited(rows,(O.themePage-1)*6+1,6))
+    rows={};for _,h in ipairs(ui.recentColors) do rows[#rows+1]={title='#'..h,hex=h,badge='APPLIQUER'} end;D.lists.recentColors:set(rows)
+    rows={};for _,m in pairs(D.pages) do if m.name==O.layoutPage then for _,c in ipairs(m.cards) do local key=D.cardKeys[c];local v=ui.cardLayouts[key] or {};rows[#rows+1]={key=key,title=c:FindFirstChild('CardTitle').Text,sub=v.wide and 'Largeur complète' or 'Largeur simple',badge=v.hidden and 'MASQUÉE' or 'VISIBLE'} end end end
+    O.layoutListPage=clamp(O.layoutListPage,1,math.max(1,math.ceil(#rows/6)));D.lists.layoutCards:set(limited(rows,(O.layoutListPage-1)*6+1,6))
+    D.value('diagMoney',S.moneyReading and S.moneyReading.available and 'Lecture active' or 'À relier / afficher')
+    D.value('diagAim',S.baitScreenPoint and 'Capturée · à valider' or 'À capturer')
+    D.value('diagPlant',O.plantProvider and 'Lecteur configuré' or (next(O.bindings) and 'Affichages liés' or 'À relier'))
+    D.value('diagFarm',S.hub.farm.available and 'Adaptateur fourni' or 'Adaptateur manquant')
+    D.value('diagPublic',O.publicStatus);D.value('diagFiles',type(writefile)=='function' and 'API présente · écriture explicite' or 'Indisponible')
+    D.displayName.Text=ui.privacy and 'Profil masqué' or tostring(player.DisplayName or player.Name)
+    D.username.Text=ui.privacy and 'Confidentialité' or '@'..tostring(player.Name)
+    D.profile:FindFirstChild('AvatarHolder').Visible=not ui.privacy
+end
+end
+
+
 S.window = window
 fitWindow()
 updateTabs()
@@ -3266,7 +4280,7 @@ end)
 ---------------------------------------------------------------------------
 do -- poisson rare (portee fermee : limite de 200 locales)
 local RARE_WORDS = { 'legendary', 'legendaire', 'mythic', 'mythique', 'omega', 'epic', 'epique' }
-local catchBaseline, catchWindowUntil, rareCooldownUntil = nil, 0, 0
+local catchBaseline, catchWindowUntil, rareCooldownUntil, rareNoticeUntil = nil, 0, 0, 0
 local function isPurple(c)
     local ok, r, g, b = pcall(function() return c.R, c.G, c.B end)
     if not ok or not isNum(r) or not isNum(g) or not isNum(b) then return false end
@@ -3294,9 +4308,10 @@ function S.onMinigameStart()
 end
 function S.onMinigameEnd(now) catchWindowUntil = now + 8 end
 local function rareTrigger(text)
-    rareCooldownUntil = os.clock() + 60
+    rareNoticeUntil=os.clock()+60
+    if ui.rareAction~='none' then rareCooldownUntil = os.clock() + 60 end
     logLine('POISSON RARE detecte : "' .. text:sub(1, 50) .. '" -> ' .. RARE_ACTIONS[ui.rareAction])
-    S.toast('Poisson rare : ' .. text:sub(1, 40), 'rare')
+    S.toast('Signal de rareté (à vérifier) : ' .. text:sub(1, 40), 'rare')
     if ui.rareAction == 'leave' then
         local rareToken = S.token
         task.delay(1, function()
@@ -3323,7 +4338,8 @@ function S.scanCatch(now)
             for _, w in ipairs(RARE_WORDS) do if f:find(w, 1, true) then rare = true end end
             if not rare and ui.rarePurple and isPurple(o.TextColor3) then rare = true end
             if rare then S.spotEvent('rareSignals') end
-            if rare and ui.rareAction ~= 'none' and os.clock() > rareCooldownUntil and S.running then rareTrigger(t) end
+            if rare and S.running and ((ui.rareAction~='none' and os.clock()>rareCooldownUntil)
+                or (ui.rareAction=='none' and ui.rareNotifications and os.clock()>rareNoticeUntil)) then rareTrigger(t) end
         end
     end
     if changed then
@@ -3537,6 +4553,7 @@ table.insert(conns, RunService.Heartbeat:Connect(function()
         end
         if now >= nextCheck then
             nextCheck = now + 0.8
+            if S.observatory then S.observatory.tick() end
             S.checkInventory(); checkBait(); S.pollMoney(false); refreshInfo()
             if not S.paused then S.scanCatch(now) end
             if S.refreshDashboard then S.refreshDashboard() end
@@ -3684,6 +4701,7 @@ function S.useRecording(which)
 end
 function S.pause() S.paused = true end
 function S.resume()
+    if S.observatory and S.observatory.queueRunning then return false end
     local info = readCapacity()
     if info and info.count >= info.limit then S.inventoryFull = true; return false end
     S.paused = false; S.fishingEnabled = true; S.cycleFailures = 0
@@ -3699,6 +4717,7 @@ function S.stop()
     if not S.running then return end
     S.token = S.token + 1
     S.running = false
+    if S.observatory then S.observatory.cleanup() end
     if S.detachMoneySource then S.detachMoneySource() end
     if S.design then S.design.cleanup() end
     S.recording = false

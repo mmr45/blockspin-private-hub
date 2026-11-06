@@ -260,5 +260,159 @@ function Core.newServer(now,maxPlayers)
     end
     return server
 end
+-- Observatoire V1.2 : calculs locaux uniquement. Aucune hierarchie de jeu supposee.
+function Core.parseDuration(value)
+    if finite(value) then return value>=0 and value<=604800 and value or nil end
+    if type(value)~='string' or #value>150 then return nil end
+    local s=value:gsub('<[^>]*>',''):lower():match('^%s*(.-)%s*$')
+    local h,m,sec=s:match('^(%d+):(%d%d):(%d%d)$')
+    if h then if tonumber(m)>59 or tonumber(sec)>59 then return nil end;return Core.parseDuration(tonumber(h)*3600+tonumber(m)*60+tonumber(sec)) end
+    m,sec=s:match('^(%d+):(%d%d)$')
+    if m then if tonumber(sec)>59 then return nil end;return Core.parseDuration(tonumber(m)*60+tonumber(sec)) end
+    local total,found=0,false
+    for n,unit in s:gmatch('(%d+)%s*([hms])') do total=total+tonumber(n)*({h=3600,m=60,s=1})[unit];found=true end
+    if found and s:gsub('%d+%s*[hms]',''):match('^%s*$') then return Core.parseDuration(total) end
+    return nil -- pas de nombre nu dans un texte : pourrait etre un prix ou un niveau
+end
+function Core.parsePercent(value)
+    if finite(value) then return value>=0 and value<=100 and value or nil end
+    if type(value)~='string' or #value>100 then return nil end
+    local n=value:gsub('<[^>]*>',''):match('^%s*(%d+[.,]?%d*)%s*%%%s*$')
+    return n and Core.parsePercent(tonumber((n:gsub(',','.')))) or nil
+end
+function Core.duration(n)
+    if not finite(n) then return 'N/D' end
+    n=math.max(0,math.ceil(n))
+    if n>=3600 then return string.format('%02d:%02d:%02d',math.floor(n/3600),math.floor(n/60)%60,n%60) end
+    return string.format('%02d:%02d',math.floor(n/60),n%60)
+end
+function Core.newPlants(serverKey)
+    local t={serverKey=serverKey,plots={},revision=0,events={}}
+    function t:observe(sample,now)
+        if type(sample)~='table' or sample.serverKey~=self.serverKey or sample.owned~=true or not nameOK(sample.id) or not nameOK(sample.crop) or not finite(now) then return false,'identite ou propriete non confirmee' end
+        local seconds,percent=Core.parseDuration(sample.remaining),Core.parsePercent(sample.percent)
+        if not seconds or not percent then return false,'temps et pourcentage requis' end
+        local p=self.plots[sample.id]
+        if not p then
+            local count=0;for _ in pairs(self.plots) do count=count+1 end
+            if count>=50 then return false,'50 parcelles maximum' end
+        end
+        local changed=not p or p.seconds~=seconds or p.percent~=percent or p.crop~=sample.crop or p.restored
+        if not changed then
+            if p.ready then p.observed=now;p.missing=false end
+            return true,'lecture identique : echeance conservee'
+        end
+        local reset=p and (p.crop~=sample.crop or (percent<p.percent and seconds>p.seconds))
+        local generation=p and (p.generation+(reset and 1 or 0)) or 1
+        p={id=sample.id,crop=sample.crop,seconds=seconds,percent=percent,observed=now,deadline=now+seconds,
+            generation=generation,ready=seconds==0 and percent==100,position=copy(sample.position),source=tostring(sample.source or ''):sub(1,512),alerts={}}
+        local old=self.plots[sample.id]
+        if old and not reset then p.alerts=old.alerts end
+        if p.position and (type(p.position)~='table' or #p.position~=3 or not finite(p.position[1]) or not finite(p.position[2]) or not finite(p.position[3])) then return false,'position invalide' end
+        self.plots[p.id]=p;self.revision=self.revision+1
+        bounded(self.events,{kind=not old and 'observed' or (reset and 'restart' or (p.ready and 'ready' or 'update')),id=p.id,at=now},80)
+        return true
+    end
+    function t:remove(id,confirmed)
+        if confirmed~=true or not self.plots[id] then return false end
+        self.plots[id]=nil;self.revision=self.revision+1;return true
+    end
+    function t:rows(now,position,group)
+        local out={}
+        for _,p in pairs(self.plots) do
+            local r=copy(p);r.remaining=math.max(0,p.deadline-now);r.age=math.max(0,now-p.observed)
+            r.estimated=p.restored==true or p.missing==true or r.age>3
+            r.status=p.ready and (r.estimated and 'Derniere maturite observee' or 'Prete (observe)') or (r.remaining==0 and 'Echeance estimee' or (r.estimated and 'Estime' or 'Observe'))
+            r.projectedPercent=p.percent
+            if p.seconds>0 and p.percent<100 then r.projectedPercent=math.min(100,p.percent+(100-p.percent)*math.min(1,r.age/p.seconds)) end
+            if position and p.position then local d=0;for i=1,3 do d=d+(position[i]-p.position[i])^2 end;r.distance=math.sqrt(d) end
+            out[#out+1]=r
+        end
+        table.sort(out,function(a,b)
+            if group and a.crop~=b.crop then return a.crop<b.crop end
+            if a.remaining~=b.remaining then return a.remaining<b.remaining end
+            return a.id<b.id
+        end)
+        return out
+    end
+    function t:alerts(now,threshold)
+        local out={}
+        for _,p in ipairs(self:rows(now)) do
+            local key=p.ready and not p.estimated and 'ready' or (p.remaining>0 and p.remaining<=threshold and 'soon' or nil)
+            local original=self.plots[p.id]
+            if key and not original.alerts[key] then original.alerts[key]=true;out[#out+1]={id=p.id,kind=key,estimated=p.estimated} end
+        end
+        return out
+    end
+    return t
+end
+function Core.pingSummary(values)
+    local a={};local sum=0
+    for _,n in ipairs(values or {}) do if finite(n) and n>=0 then a[#a+1]=n;sum=sum+n end end
+    if #a==0 then return {} end
+    table.sort(a);local mid=math.floor((#a+1)/2)
+    return {count=#a,min=a[1],max=a[#a],mean=sum/#a,median=#a%2==1 and a[mid] or (a[mid]+a[mid+1])/2}
+end
+function Core.filterRoster(server,query,order,friends)
+    local rows={};query=tostring(query or ''):lower():sub(1,64)
+    for _,p in ipairs(server:roster()) do
+        if query=='' or p.name:lower():find(query,1,true) or p.display:lower():find(query,1,true) then rows[#rows+1]=p end
+    end
+    table.sort(rows,function(a,b)
+        if order=='friends' and (friends[a.id]==true)~=(friends[b.id]==true) then return friends[a.id]==true end
+        if order=='recent' and a.observed~=b.observed then return a.observed>b.observed end
+        if a.name:lower()==b.name:lower() then return a.id<b.id end
+        return a.name:lower()<b.name:lower()
+    end)
+    return rows
+end
+function Core.validateServers(payload,currentJob,minFree,maxPopulation)
+    if type(payload)~='table' or type(payload.data)~='table' or #payload.data>100 then return nil,'liste publique invalide' end
+    local out,seen={},{}
+    for _,r in ipairs(payload.data) do
+        if type(r)=='table' and type(r.id)=='string' and #r.id<=128 and r.id:match('^[%w%-]+$') and not seen[r.id]
+            and finite(r.playing) and r.playing>=0 and r.playing%1==0 and finite(r.maxPlayers) and r.maxPlayers>0 and r.maxPlayers%1==0 and r.playing<=r.maxPlayers then
+            seen[r.id]=true
+            if r.id~=currentJob and r.maxPlayers-r.playing>=minFree and r.playing<=maxPopulation then out[#out+1]={id=r.id,playing=r.playing,maxPlayers=r.maxPlayers} end
+        end
+    end
+    local cursor=payload.nextPageCursor
+    if cursor~=nil and (type(cursor)~='string' or #cursor>512 or cursor:find('%c')) then return nil,'curseur invalide' end
+    return out,cursor
+end
+function Core.validWorkspace(data)
+    if type(data)~='table' or data.schema~=1 or type(data.favorites)~='table' or type(data.sessions)~='table' or type(data.plants)~='table' then return nil,'format observatoire invalide' end
+    if #data.favorites>30 or #data.sessions>30 or #data.plants>50 then return nil,'limite observatoire depassee' end
+    local function identifier(s) return type(s)=='string' and #s>0 and #s<=128 and s:match('^[%w%-]+$') end
+    local out={schema=1,favorites={},sessions={},plants={},serverKey=type(data.serverKey)=='string' and data.serverKey:sub(1,160) or ''}
+    local seen={}
+    for _,v in ipairs(data.favorites) do
+        if type(v)~='table' or not identifier(v.job) or not finite(v.place) or v.place<1 or v.place%1~=0 or not nameOK(v.name) or seen[v.place..':'..v.job] then return nil,'favori invalide' end
+        seen[v.place..':'..v.job]=true;out.favorites[#out.favorites+1]={job=v.job,place=v.place,name=v.name}
+    end
+    for _,v in ipairs(data.sessions) do
+        if type(v)~='table' or not nameOK(v.id) or not finite(v.elapsed) or v.elapsed<0 or not finite(v.at) or not finite(v.increases) or v.increases<0 or not finite(v.decreases) or v.decreases<0 or not identifier(v.job) or not finite(v.place) or v.place<1 then return nil,'session invalide' end
+        out.sessions[#out.sessions+1]={id=v.id,elapsed=v.elapsed,at=v.at,increases=v.increases,decreases=v.decreases,job=v.job,place=v.place}
+    end
+    local t=Core.newPlants(out.serverKey)
+    for _,v in ipairs(data.plants) do
+        if type(v)~='table' or not finite(v.savedAt) then return nil,'plante sauvegardee invalide' end
+        local sample=copy(v);sample.owned=true;sample.serverKey=out.serverKey
+        if not t:observe(sample,v.savedAt) then return nil,'plante invalide' end
+        out.plants[#out.plants+1]={id=v.id,crop=v.crop,remaining=v.remaining,percent=v.percent,position=copy(v.position),savedAt=v.savedAt}
+    end
+    return out
+end
+function Core.validateQueue(rows)
+    if type(rows)~='table' or #rows<1 or #rows>20 then return nil,'1 a 20 etapes requises' end
+    local out={}
+    for _,r in ipairs(rows) do
+        if type(r)~='table' or not ({route=true,cycle=true,plants=true,pause=true})[r.kind] or not finite(r.timeout) or r.timeout<1 or r.timeout>1800 then return nil,'etape ou delai invalide' end
+        if r.kind=='route' and not nameOK(r.name) then return nil,'destination requise' end
+        out[#out+1]={kind=r.kind,name=r.name,timeout=r.timeout}
+    end
+    return out
+end
 Core.copy = copy
+Core.validName = nameOK
 return Core

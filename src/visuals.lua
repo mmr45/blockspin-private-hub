@@ -61,7 +61,8 @@ function D.rowList(parent,id,limit,emptyLabel)
         local title=text(row,'',12,theme.text);title.Position=UDim2.fromOffset(28,4);title.Size=UDim2.new(0.7,-28,0,22)
         local sub=text(row,'',9,theme.muted);sub.Position=UDim2.fromOffset(28,25);sub.Size=UDim2.new(0.75,-28,0,14)
         local badge=text(row,'',10,theme.muted);badge.Position=UDim2.fromScale(0.7,0);badge.Size=UDim2.new(0.3,-12,1,0);badge.TextXAlignment=Enum.TextXAlignment.Right
-        list.pool[i]={root=row,title=title,sub=sub,badge=badge}
+        local avatar=make('ImageLabel',{Name='PlayerAvatar',Visible=false,BackgroundTransparency=1,Size=UDim2.fromOffset(30,30),Position=UDim2.fromOffset(8,7),Image=''},row);corner(avatar,8)
+        list.pool[i]={root=row,title=title,sub=sub,badge=badge,avatar=avatar,dot=dot}
         connect(row.Activated,function() if list.onSelect and list.rows and list.rows[i] then list.onSelect(list.rows[i]) end end)
     end
     function list:set(rows)
@@ -69,7 +70,14 @@ function D.rowList(parent,id,limit,emptyLabel)
         local n=math.min(#rows,self.limit);self.empty.Visible=n==0
         for i,entry in ipairs(self.pool) do
             entry.root.Visible=i<=n
-            if rows[i] then entry.title.Text=tostring(rows[i].title or '');entry.sub.Text=tostring(rows[i].sub or '');entry.badge.Text=tostring(rows[i].badge or '') end
+            if rows[i] then
+                local r=rows[i];entry.title.Text=tostring(r.title or '');entry.sub.Text=tostring(r.sub or '');entry.badge.Text=tostring(r.badge or '')
+                entry.avatar.Visible=isNum(r.avatarId) and r.avatarId>0
+                if entry.avatar.Visible then entry.avatar.Image='rbxthumb://type=AvatarHeadShot&id='..string.format('%.0f',r.avatarId)..'&w=150&h=150' end
+                entry.dot.Visible=not entry.avatar.Visible
+                entry.title.Position=UDim2.fromOffset(entry.avatar.Visible and 46 or 28,4);entry.title.Size=UDim2.new(0.7,entry.avatar.Visible and -46 or -28,0,22)
+                entry.sub.Position=UDim2.fromOffset(entry.avatar.Visible and 46 or 28,25)
+            end
         end
         self.root.Size=UDim2.new(1,0,0,n==0 and 42 or n*50-6)
     end
@@ -193,10 +201,14 @@ function D.buildServer(serverPage,action)
     local monitor=S.server
     local function added(p,baseline)
         if not S.running then return end
-        monitor:add(p.UserId,p.Name,p.DisplayName,os.clock(),baseline)
+        local changed=monitor:add(p.UserId,p.Name,p.DisplayName,os.clock(),baseline)
+        if changed and S.observatory then S.observatory.queueFriend(p);if not baseline then S.observatory.presence('arrivee',p.UserId) end end
     end
     connect(Players.PlayerAdded,function(p) added(p,false) end)
-    connect(Players.PlayerRemoving,function(p) if S.running then monitor:remove(p.UserId,os.clock()) end end)
+    connect(Players.PlayerRemoving,function(p) if S.running then
+        if S.observatory then S.observatory.presence('depart',p.UserId) end
+        monitor:remove(p.UserId,os.clock())
+    end end)
     local ok,players=pcall(function() return Players:GetPlayers() end)
     if ok then for _,p in ipairs(players) do added(p,true) end end
     D.section(serverPage,'Serveur en direct')
@@ -287,11 +299,15 @@ function D.refreshVisuals()
         if meta.name=='Money' then vals={shortMoney(m.observedIncreases),shortMoney(S.moneyReading and S.moneyReading.available and S.moneyReading.value or nil),rate}
         elseif meta.name=='Vehicle' then vals={S.car and S.car.name or '—',tostring(countKeys(h.library.routes)),tostring(#S.recordBuffer)}
         elseif meta.name=='Server' then vals={S.server and tostring(S.server.count) or '—',S.server and tostring(S.server.maxPlayers or '?') or '—',isNum(D.lastPing) and string.format('%.0f ms',D.lastPing*1000) or 'N/D'}
-        elseif meta.name=='Farming' then vals={tostring(h.farm.planted),tostring(h.farm.harvested),tostring(h.farm.cycles)}
+        elseif meta.name=='Farming' then
+            local rows=S.observatory and S.observatory.plants:rows(os.clock()) or {};local ready=0
+            for _,r in ipairs(rows) do if r.ready and not r.estimated then ready=ready+1 end end
+            vals={tostring(#rows),tostring(ready),rows[1] and ((rows[1].estimated and '~ ' or '')..Hub.duration(rows[1].remaining)) or '—'}
         elseif meta.name=='Settings' then vals={'#'..ui.accent,string.format('%.0f %%',ui.scale*100),ui.animations and 'Activées' or 'Coupées'}
         elseif meta.name=='Statistics' then vals={string.format('%02d:%02d',math.floor(snap.elapsed/60),math.floor(snap.elapsed%60)),tostring(S.castAttempts),tostring(#h.errors)}
         else vals={S.inventoryText or '—',S.baitUnknown and '—' or 'x'..tostring(S.baitCount),tostring(S.castAttempts)} end
         for i,v in ipairs(vals) do meta.tiles[i].Text=v end
     end
     D.refreshServer()
+    if D.refreshInsights then D.refreshInsights() end
 end

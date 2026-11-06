@@ -237,6 +237,7 @@ local RunService = { Heartbeat = Signal(), RenderStepped = Signal() }
 local UIS = { InputBegan = Signal(), InputChanged = Signal(), InputEnded = Signal(), WindowFocusReleased = Signal(), WindowFocused=Signal(), focused = nil }
 workspace.CurrentCamera = new('Camera','CurrentCamera',workspace,{ ViewportSize = Vector2.new(1920,1080) })
 function player:GetNetworkPing() return 0.05 end
+function player:IsFriendsWith(id) return M.friendIds and M.friendIds[id]==true end
 function player:GetMouse() return {Hit={Position=M.mouseWorld}} end
 function workspace.CurrentCamera:WorldToViewportPoint(point)
     if M.projectedPoint then return M.projectedPoint,M.projectedVisible~=false end
@@ -303,6 +304,14 @@ M.cash = 500
 local Http = {}
 function Http:JSONEncode(t) return py_json_encode(t) end
 function Http:JSONDecode(s) return py_json_decode(s) end
+function Http:GetAsync(url)
+    M.httpCalls=(M.httpCalls or 0)+1;M.lastHttpUrl=url
+    if M.httpDelay then task.wait(M.httpDelay) end
+    if M.httpResponse then return M.httpResponse end
+    error('HTTP indisponible dans la maquette par defaut')
+end
+function Http:UrlEncode(s) return (s:gsub('[^%w%-_%.~]',function(c) return string.format('%%%02X',string.byte(c)) end)) end
+M.Http=Http
 local Path = {}
 function Path:CreatePath()
     local p = { Status = Enum.PathStatus.Success }
@@ -334,6 +343,7 @@ function TweenService:Create(o, info, props) M.tweenCount=(M.tweenCount or 0)+1
     return tween end
 local GuiService={GetGuiInset=function() return Vector2.new(0,36),Vector2.new(0,0) end}
 local services = { GuiService=GuiService, TweenService = TweenService, Players = Players, RunService = RunService, UserInputService = UIS, VirtualInputManager = VIM, HttpService = Http, PathfindingService = Path }
+services.TeleportService={TeleportToPlaceInstance=function(_,place,job,p) M.teleport={place=place,job=job,player=p};if M.teleportError then error(M.teleportError) end end}
 game = DataModel
 game.JobId='mock-job-123';game.PlaceId=104715542330896
 function DataModel:GetService(n) return services[n] or error('service inconnu ' .. n) end

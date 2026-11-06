@@ -73,3 +73,21 @@ Aucun cas de cette version n'a été exécuté en jeu. Consigner chaque résulta
 37. Éloigner le curseur puis lancer, changer légèrement la caméra, mettre la cible hors champ : lancer correctement visé ou suspension explicite, jamais succès supposé.
 38. Mini-jeu : curseur ailleurs mais Roblox actif, clic sur la barre détectée. Autre application au premier plan : pause sans clic OS parasite. Retour dans Roblox : reprise. Répéter en fenêtre et plein écran pour vérifier l’inset.
 39. Saisir un nom de spot, glisser un réglage, presser F12 pendant l’attente de visée : aucun lancer/clic retardé après annulation.
+
+
+## V1.2.0 — observatoire et configuration (à faire dans Roblox)
+
+40. Près d’une plante à soi : rechercher temps/%, vérifier les chemins via export agricole, choisir la paire et confirmer une parcelle/type. Vérifier les valeurs contre le jeu. Une paire ambiguë ou celle d’un autre joueur ne doit pas être adoptée.
+41. S’éloigner assez pour provoquer le streaming : le timer reste visible mais devient estimé. Au retour une nouvelle valeur recale l’échéance. Un affichage figé ne repousse pas indéfiniment le timer.
+42. Vérifier maturité réelle (temps 0 et 100%) versus échéance calculée ; aucune récolte annoncée par disparition d’objet. Replantation : contrôler le recalage. L’espèce saisie reste une étiquette tant que sa source réelle n’est pas reliée.
+43. Si le jeu recycle un BillboardGui vers une autre parcelle, vérifier que l’ancienne liaison suspend ses lectures. Exporter le diagnostic si le scanner ne reconnaît pas les formats réels.
+44. Sauvegarder puis recharger sur le même serveur : estimation restaurée, sans recréer une preuve ni liaison automatique. Changer de serveur : aucune plante de l’ancien ne réapparaît. Tester un fichier invalide sans l’écraser.
+45. Joueur qui rejoint/quitte : comptage unique, UTC, durée de présence depuis observation seulement ; recherche, tri, avatars et amis. Activer explicitement les notifications puis tester un joueur suivi et un ami connu.
+46. Confidentialité : vérifier profil, roster, arrivées/départs, identifiants serveurs et export de bilan sans identités. Le jeu lui-même et les copies techniques explicites restent hors de ce mode.
+47. Comparer les ping courant/min/médian/moyen/max à des mesures réelles ; coupure de lecture → N/D. La durée affichée est celle du hub, pas l’âge du serveur.
+48. Publics : actualiser, filtrer, paginer ; échec HTTP explicite si refusé dans le client. Choisir seul ne change rien. Confirmation expirée au bout de 15 s ; confirmation valide via Roblox. Consigner l’arrivée réelle séparément.
+49. Favoris et bilan : aucun fichier automatique au chargement/arrêt. Sauvegarder explicitement ; deux sauvegardes de la même session actualisent son bilan. Vérifier 30 bilans/favoris maximum.
+50. Cartes : déplacer par monter/descendre, largeur, masquer/afficher et reset ; garder les réglages d’organisation accessibles. Palette souris/tactile, HEX, couleurs récentes, thèmes, profils et import/export JSON ; reset d’apparence conserve les données.
+51. Mini-dashboard : déplacer, ouvrir le hub et STOP ; tester petit écran, animation désactivée et menu masqué. Vérifier qu’il n’intercepte pas une cible de pêche.
+52. File : pause puis trajet, erreurs et délais, STOP avant la prochaine étape. Une échéance calculée ne valide pas une plante prête. Cycle réel puis pause suivante uniquement après validation individuelle du vendeur, ATM et trajets.
+53. Après chaque série noter version, date, résultat et capture ; ne pas convertir une réussite en simulation en confirmation du jeu réel. Remplir les points P0/P1 de CONFIGURATION.md à partir de ces observations.
