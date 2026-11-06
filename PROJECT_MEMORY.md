@@ -1,3 +1,16 @@
+# V1.2.2 — activation et disponibilité réelles de la canne — 2026-11-06
+
+- Base : main `06371e9ecbab48169fb1dddabfd3979e68a4b79b`, PR #8 fusionnée par l’utilisateur ; branche `fix/v1.2.2-rod-activation`, PR sans fusion automatique.
+- Retour réel après livraison de la ligne 1.2.1 : « la pêche bug encore », « lancer en cours », attente d’au moins 15 s. La précédente correction n’a donc pas résolu le problème utilisateur. Aucun essai réel 1.2.2 confirmé.
+- Expérience locale comparative avec deux activations ignorées par l’outil : 1.2.1 attend 16,40 s après fin du mini-jeu ; 1.2.2 obtient une activation en 2,18 s dans la même maquette. Cela démontre ce chemin de retard, pas la cause réelle certaine du PC utilisateur.
+- Contrôle public `Tool.Enabled` avant activation ; jamais d’écriture de Enabled. Une canne indisponible n’est pas comptée comme lancée. Outil remplacé : pas de délai hérité de l’ancien.
+- Pression complète : Deactivate préalable pour libérer une ancienne pression, Activate puis Deactivate après environ 50 ms. Relâchement aussi sur STOP, perte de focus, pause, changement de mode et fermeture.
+- Signal Tool.Activated observé jusqu’à 150 ms. API sans signal reçu : pas de faux succès pénalisé de 8 s, récupération bornée de 0,5/1/2/4 s. Signal inaccessible : appel marqué non vérifié, attente prudente conservée. Un signal Tool.Activated reste une preuve locale d’entrée seulement, pas une preuve d’appât ou de capture.
+- CanvasGroup entièrement transparent : sa présence ne prolonge plus le mini-jeu. Aucune hiérarchie ni propriété BlockSpin privée inventée.
+- Fishing : état de canne, phase/compte à rebours et export JSON local explicite des 40 dernières transitions. Aucun envoi automatique ; pas de pseudo, JobId ni secret dans ce diagnostic.
+- 542 vérifications locales réussies (511 conservées + 31 nouvelles), build et statique ; la maquette modélise désormais Enabled, Activated/Deactivated, pression maintenue, activations ignorées, délai de signal et erreurs.
+- Voir `tests/VALIDATION_V122.md`, essais 60–65 de `tests/MANUAL.md`. Si la latence persiste, exploiter le diagnostic réel au lieu de conclure d’un simple compteur Tool:Activate.
+
 # V1.2.1 — régression de relance pêche — 2026-11-06
 
 - Base : main `abc178d8ed7e6e828bf28358170976a09b0d8e1f`, PR #7 fusionnée par l’utilisateur. Branche dédiée `fix/v1.2.1-fishing-recast`, livraison par PR sans fusion automatique.

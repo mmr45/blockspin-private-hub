@@ -1,3 +1,19 @@
+# Correctif V1.2.2 — 2026-11-06
+
+L’utilisateur signale toujours au moins 15 s de retard après la livraison 1.2.1. La nouvelle correction traite les activations ignorées et le cycle de pression de la canne. **Pas de validation Roblox/Xeno V1.2.2.**
+
+| Changement | Preuve locale | Limite |
+|---|---|---|
+| Canne prête | Enabled=false ne produit aucune activation ; reprise au retour à true, outil remplacé sans délai ancien | État public local, aucun cooldown serveur modifié |
+| Pression complète | Deactivate/Activate/Deactivate, quatre manches avec verrou de pression, relâchement STOP/focus/mode | Comportement exact des handlers de la vraie canne à valider |
+| Activation ignorée | Comparaison locale : 16,40 s en 1.2.1 contre 2,18 s en 1.2.2 après deux appels ignorés | Simulation du cas, pas mesure Roblox ni garantie de débit |
+| Signal et reprise | Activated différé, signal inaccessible/non vérifié, refus et backoff borné, pas de fuite de connexions | Activated ne prouve pas qu’un appât est réellement apparu |
+| Mini-jeu et diagnostic | CanvasGroup invisible reconnu terminé ; phases/compteur/export local testés | Lire un diagnostic réel si le problème persiste |
+
+**542 vérifications locales, 0 échec.** Voir [tests/VALIDATION_V122.md](tests/VALIDATION_V122.md).
+
+---
+
 # Correctif V1.2.1 — 2026-11-06
 
 Retour utilisateur : relance lente et curseur à bouger depuis la modification de visée. Causes plausibles identifiées dans le code ; correction non confirmée dans Roblox.

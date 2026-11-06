@@ -1,3 +1,14 @@
+# V1.2.2 — 2026-11-06
+
+- Vérifier Tool.Enabled sans le modifier ; attendre la disponibilité sans compter un faux lancer ni imposer 8 s après un appel ignoré.
+- Pression complète de la canne avec Deactivate avant Activate puis relâchement après environ 50 ms ; nettoyage sur STOP/focus/pause/mode/fermeture.
+- Observer Tool.Activated, distinguer demande/signal/appel non vérifié, reprise bornée en cas d’ignorance ou d’erreur. Aucun cooldown serveur contourné.
+- Une canne remplacée n’hérite plus du retry de l’ancienne ; un CanvasGroup totalement transparent ne prolonge plus la pêche.
+- État de canne, phase/délai et export de diagnostic local dans Fishing.
+- 542 vérifications réussies. Comparaison du cas simulé de deux activations ignorées : 16,40 s en 1.2.1 → 2,18 s en 1.2.2. Résultat réel encore à valider.
+
+---
+
 # V1.2.1 — 2026-11-06
 
 - Pêche classique par défaut : retire l’obligation de visée stricte qui peut bloquer la canne sur un Mouse.Hit figé ou un spot sans capture. Visée enregistrée disponible en option explicite.

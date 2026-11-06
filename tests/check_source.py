@@ -1,6 +1,7 @@
 """Controles statiques du script genere (aucune execution Roblox n'est simulee ici).
 Les tests de comportement sont dans tests/run_tests.py."""
 from pathlib import Path
+import re
 
 root = Path(__file__).resolve().parents[1]
 source = (root / "src/main.lua").read_text(encoding="utf-8")
@@ -14,7 +15,8 @@ assert "--@@VISUALS@@" not in source
 assert (root / "src/hub_core.lua").read_text(encoding="utf-8") in source
 assert "local DEFAULT_DATA = {" in source
 assert source.replace("\r\n", "\n").count("\n") > cycle.count("\n"), "main.lua doit contenir les donnees injectees"
-assert "local VERSION = '1.2.1'" in source
+assert "local VERSION = '1.2.2'" in source
+assert not re.search(r"\btool\.Enabled\s*=(?!=)", source), "la disponibilite du Tool ne doit jamais etre forcee"
 for name in ("observatory", "workspace_ui"):
     assert (root / "src" / (name + ".lua")).read_text(encoding="utf-8") in source
     assert "--@@" + name.upper() + "@@" not in source
