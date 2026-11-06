@@ -47,3 +47,10 @@ Aucun cas de cette version n'a été exécuté en jeu. Consigner chaque résulta
 | Date | Version / commit | Roblox / Xeno | Cas | Résultat | Preuve / erreur |
 |---|---|---|---|---|---|
 | À remplir | 1.0.0 / … | … | … | Non exécuté | … |
+
+## Refonte de l’interface : essais réels supplémentaires
+
+23. Vérifier photo Roblox, DisplayName et @username du compte connecté, noms longs et avatar de remplacement si la miniature reste indisponible.
+24. Changer rapidement d’onglet, réduire puis rouvrir immédiatement, alterner RightShift : aucune page grisée ni fermeture tardive. Couper Animations et vérifier les états instantanés.
+25. Tester 960 × 640, mode compact, échelle 150 %, redimensionnement de la fenêtre Roblox et changement de caméra : sections empilées, accès par défilement, avatar et STOP accessibles.
+26. Fermer et relancer pendant le chargement de la photo : aucune ancienne interface ni animation restante. Vérifier le masquage automatique du mini-jeu sans bouton de réouverture superposé.

@@ -13,13 +13,19 @@ Environnement : Linux, Python 3.12, environnement virtuel avec `lupa==2.8`, runt
 | `python -I build.py` | Script complet généré |
 | `python -I build.py --check` | Concordance exacte des sources et du script généré |
 | `python -I tests/check_source.py` | Contrôles statiques réussis |
-| `python -I tests/run_tests.py` avec le venv | 205 vérifications, 0 échec |
+| `python -I tests/run_tests.py` avec le venv | 251 vérifications, 0 échec |
 | `git diff --check` | Réussi |
 | `data/route_data.json`, archives, README et loaders | Conservés sans changement dans la livraison |
 
 La suite couvre les scénarios historiques, le pilote simplifié, la vitesse finale de stationnement, les six onglets, les profils, les bibliothèques et leurs limites, les fichiers invalides, l'attribution des revenus, les décimales monétaires, l'annulation et les délais, le cycle complet avec revenus/dépôt, l'agriculture multi-plantes avec replantation simulée et le refus des résultats agricoles sans observation.
 
 La compilation du script est contrôlée, avec une marge d'au moins dix variables locales sous la limite de 200 du bloc principal.
+
+## Contrat de présentation ajouté
+
+46 cas supplémentaires couvrent le profil du joueur, les appels et échecs de miniature, le chargement image, la fermeture pendant un appel en attente, les cartes en colonnes/empilées, les interrupteurs, les transitions rapides, la réouverture, l’absence d’interpolation quand les animations sont coupées, le nettoyage, la migration des tailles et les changements de résolution/caméra.
+
+Les maquettes visuelles ont été construites depuis l’arbre d’instances exporté de la maquette Lua, puis inspectées avec Chromium. Elles utilisent une représentation de remplacement pour l’avatar. Elles ne constituent pas des captures Roblox et ne valident pas les polices ni le moteur de mise en page du jeu.
 
 ## Limites et essais nécessaires
 

@@ -8,6 +8,8 @@ cycle = (root / "src/cycle.lua").read_text(encoding="utf-8")
 
 assert "--@@DEFAULT_DATA@@" not in source, "src/main.lua non regenere : lancer build.py"
 assert "--@@HUB_CORE@@" not in source
+assert "--@@INTERFACE@@" not in source
+assert (root / "src/interface.lua").read_text(encoding="utf-8") in source
 assert (root / "src/hub_core.lua").read_text(encoding="utf-8") in source
 assert "local DEFAULT_DATA = {" in source
 assert source.replace("\r\n", "\n").count("\n") > cycle.count("\n"), "main.lua doit contenir les donnees injectees"

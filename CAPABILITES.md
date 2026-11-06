@@ -10,11 +10,11 @@
 | Stationnement | Succès exige vitesse mesurée ≤ 3 studs/s | Pas d'orientation finale ni calibration réelle |
 | Money Manager | Attribution vente, décimales, dépôt distinct et cycle complet simulés | Instantanés de GUI ; dépôt non prouvé côté serveur |
 | Culture/replantation | Moteur multi-plantes testé avec adaptateur local simulé | **Adaptateur BlockSpin absent : culture en jeu indisponible** |
-| Black Edition et AFK | Six onglets, commandes, métriques, erreurs et réglages testés en maquette | Rendu et entrées réels non testés |
+| Black Edition et AFK | Six onglets, profil officiel/avatar, cartes adaptatives, transitions, métriques et réglages testés en maquette | Rendu, miniature et entrées réels Roblox non testés |
 | Supervision et STOP | Expiration, exceptions, preuve absente, annulations testées | Dépend de la coopération des actions/adaptateurs ; arrêt physique non instantané |
 | Build et sécurité statique | Script généré exact, aucun nouveau remote, chargement distant ou déplacement direct | Ne constitue pas une validation du jeu |
 
-Résultats : **205 vérifications, 0 échec** sous Lua 5.4 avec `lupa==2.8`. Détails dans `tests/VALIDATION_V1.md`, essais réels dans `tests/MANUAL.md`.
+Résultats : **251 vérifications, 0 échec** sous Lua 5.4 avec `lupa==2.8`. Détails dans `tests/VALIDATION_V1.md`, essais réels dans `tests/MANUAL.md`.
 
 ---
 

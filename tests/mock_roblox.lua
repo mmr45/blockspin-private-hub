@@ -82,7 +82,7 @@ M.Signal = Signal
 
 -- Instances ---------------------------------------------------------------
 local ISA = {
-    GuiObject = { Frame = 1, TextLabel = 1, TextButton = 1, ImageButton = 1, TextBox = 1, ScrollingFrame = 1 },
+    GuiObject = { Frame = 1, TextLabel = 1, TextButton = 1, ImageButton = 1, TextBox = 1, ScrollingFrame = 1, CanvasGroup = 1, ImageLabel = 1 },
     BasePart = { Part = 1, VehicleSeat = 1, Seat = 1 },
     GuiButton = { TextButton = 1, ImageButton = 1 },
 }
@@ -92,19 +92,23 @@ local function new(class, name, parent, props)
     setmetatable(o, Inst)
     for k, v in pairs(props or {}) do o[k] = v end
     if class == 'TextButton' or class == 'ImageButton' then o.MouseButton1Click = Signal(); o.Activated = Signal() end
-    if ISA.GuiObject[class] then o.InputBegan = Signal() end
+    if class=='ImageLabel' then o.IsLoaded=M.thumbnailLoaded~=false end
+    if ISA.GuiObject[class] then o.InputBegan = Signal(); o.MouseEnter = Signal(); o.MouseLeave = Signal() end
     o._propSignals = {}
     if parent then o:SetParent(parent) end
     return o
 end
 M.new = new
-Inst.__index = Inst
+Inst.__index = function(t,k)
+    if k=='Parent' then return rawget(t,'_parent') end
+    return Inst[k]
+end
 function Inst:SetParent(p)
     if self.Parent then
         local list = self.Parent._children
         for i, c in ipairs(list) do if c == self then table.remove(list, i); break end end
     end
-    rawset(self, 'Parent', p)
+    rawset(self, '_parent', p)
     if p then table.insert(p._children, self) end
 end
 Inst.__newindex = function(t, k, v)
@@ -131,7 +135,10 @@ function Inst:FindFirstAncestorWhichIsA(c) local p = self.Parent; while p do if 
 function Inst:FindFirstAncestorOfClass(c) local p = self.Parent; while p do if p.ClassName == c then return p end; p = p.Parent end end
 function Inst:IsDescendantOf(a) local p = self.Parent; while p do if p == a then return true end; p = p.Parent end; return false end
 function Inst:GetFullName() local n = self.Name; local p = self.Parent; while p and p.ClassName ~= 'DataModel' do n = p.Name .. '.' .. n; p = p.Parent end; return n end
-function Inst:Destroy() self:SetParent(nil); self.destroyed = true end
+function Inst:Destroy()
+    for _,child in ipairs(self:GetChildren()) do child:Destroy() end
+    self:SetParent(nil); self.destroyed = true
+end
 function Inst:GetAttribute(k) return self.attrs and self.attrs[k] end
 function Inst:ClearAllChildren() self._children = {} end
 function Inst:GetPropertyChangedSignal(p) self._propSignals[p] = self._propSignals[p] or Signal(); return self._propSignals[p] end
@@ -143,6 +150,14 @@ M.workspace = workspace
 local Players = new('Players', 'Players', DataModel)
 local player = new('Player', 'Player1', Players)
 Players.LocalPlayer = player
+player.Name='mmr45'; player.DisplayName='Osman'; player.UserId=143872552
+function Players:GetUserThumbnailAsync(id,kind,size)
+    M.thumbnailCalls=(M.thumbnailCalls or 0)+1
+    M.thumbnailUserId=id
+    if M.thumbnailFail then error('thumbnail unavailable') end
+    if M.thumbnailWait then task.wait(M.thumbnailWait) end
+    return 'rbxthumb://type=AvatarHeadShot&id='..id..'&w=150&h=150', M.thumbnailReady~=false
+end
 local pg = new('PlayerGui', 'PlayerGui', player)
 local backpack = new('Backpack', 'Backpack', player)
 M.pg, M.player, M.backpack = pg, player, backpack
@@ -214,7 +229,7 @@ function M.setRoot(pos) root.Position = pos; root.CFrame = CFrame.new(pos.X, pos
 -- Services ------------------------------------------------------------------
 local RunService = { Heartbeat = Signal(), RenderStepped = Signal() }
 local UIS = { InputBegan = Signal(), InputChanged = Signal(), InputEnded = Signal(), WindowFocusReleased = Signal(), focused = nil }
-workspace.CurrentCamera = { ViewportSize = Vector2.new(1920, 1080) }
+workspace.CurrentCamera = new('Camera','CurrentCamera',workspace,{ ViewportSize = Vector2.new(1920,1080) })
 function player:GetNetworkPing() return 0.05 end
 function player:Kick(msg) M.kicked = msg end
 function UIS:GetFocusedTextBox() return self.focused end
@@ -281,7 +296,22 @@ end
 TweenInfo = { new = function(...) return { ... } end }
 ColorSequence = { new = function(...) return { ... } end }
 local TweenService = {}
-function TweenService:Create(o, info, props) return { Play = function() for k, v in pairs(props) do o[k] = v end end } end
+function TweenService:Create(o, info, props) M.tweenCount=(M.tweenCount or 0)+1
+    local tween={Completed=Signal(),PlaybackState=Enum.PlaybackState.Begin,cancelled=false}
+    function tween:Play()
+        self.PlaybackState=Enum.PlaybackState.Playing
+        local function finish()
+            if self.cancelled then return end
+            for k,v in pairs(props) do o[k]=v end
+            self.PlaybackState=Enum.PlaybackState.Completed;self.Completed:Fire(self.PlaybackState)
+        end
+        if M.deferTweens then task.delay(info[1] or 0.2,finish) else finish() end
+    end
+    function tween:Cancel()
+        M.tweenCancels=(M.tweenCancels or 0)+1;self.cancelled=true
+        self.PlaybackState=Enum.PlaybackState.Cancelled;self.Completed:Fire(self.PlaybackState)
+    end
+    return tween end
 local services = { TweenService = TweenService, Players = Players, RunService = RunService, UserInputService = UIS, VirtualInputManager = VIM, HttpService = Http, PathfindingService = Path }
 game = DataModel
 function DataModel:GetService(n) return services[n] or error('service inconnu ' .. n) end

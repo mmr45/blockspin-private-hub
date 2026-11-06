@@ -360,12 +360,12 @@ local function setState(state, detail)
         elseif state == 'NO_BAIT' then S.toast('Plus d\'appats : lancers arretes', 'error') end
     end
     S.lastToastState = state
-    local txt = state .. (S.detail ~= '' and (' | ' .. S.detail) or '')
+    local txt = S.design and S.design.stateText(state,S.detail) or (state .. (S.detail ~= '' and (' | ' .. S.detail) or ''))
     if stateLabel and stateLabel.Parent and stateLabel.Text ~= txt then stateLabel.Text = txt end
 end
 local function update(detail) -- detail sans changer d'etat (compat v0.6.8)
     S.detail = detail
-    local txt = S.state .. ' | ' .. tostring(detail)
+    local txt = S.design and S.design.stateText(S.state,detail) or (S.state .. ' | ' .. tostring(detail))
     if stateLabel and stateLabel.Parent and stateLabel.Text ~= txt then stateLabel.Text = txt end
 end
 
@@ -1393,10 +1393,10 @@ end
 -- Clavier : touche d'affichage (RightShift par defaut) et F12 (urgence) seulement.
 ---------------------------------------------------------------------------
 local SETTINGS_FILE = 'blockspin-settings-v1.json'
-local ui = { accent = 'C5F277', hotkey = 'RightShift', scale = 1, metrics = true, overlay = false, hideInMinigame = true,
-    speedPreset = 'Rapide', rareAction = 'none', rarePurple = true, toasts = true, animations = true }
+local ui = { accent = 'FF475C', hotkey = 'RightShift', scale = 1, metrics = true, overlay = false, hideInMinigame = true,
+    speedPreset = 'Rapide', rareAction = 'none', rarePurple = true, toasts = true, animations = true, layoutVersion = 2 }
 local PREF_KEYS = { 'accent', 'hotkey', 'scale', 'metrics', 'overlay', 'hideInMinigame', 'speedPreset', 'rareAction', 'rarePurple', 'toasts', 'animations',
-    'position', 'size', 'overlayPosition' }
+    'position', 'size', 'overlayPosition', 'layoutVersion' }
 local RARE_ACTIONS = { none = 'ne rien faire', leave = 'quitter le serveur', sell = 'aller vendre' }
 local settingsRaw -- fichier lu en entier : profils et champs du hub 0.4.0 conserves
 local function validKeyName(n)
@@ -1449,10 +1449,10 @@ end
 S.setSpeedPreset(ui.speedPreset)
 
 local theme = {
-    background = Color3.fromRGB(0, 0, 0), surface = Color3.fromRGB(8, 8, 8),
-    control = Color3.fromRGB(16, 16, 16), border = Color3.fromRGB(38, 38, 38),
-    text = Color3.fromRGB(241, 244, 239), muted = Color3.fromRGB(166, 175, 181),
-    danger = Color3.fromRGB(150, 40, 40),
+    background = Color3.fromRGB(9, 10, 13), surface = Color3.fromRGB(15, 16, 20),
+    control = Color3.fromRGB(22, 23, 29), border = Color3.fromRGB(34, 36, 44),
+    text = Color3.fromRGB(238, 239, 245), muted = Color3.fromRGB(130, 135, 152),
+    danger = Color3.fromRGB(175, 42, 61),
 }
 local function hexColor(h) return Color3.fromRGB(tonumber(h:sub(1, 2), 16), tonumber(h:sub(3, 4), 16), tonumber(h:sub(5, 6), 16)) end
 theme.accent = hexColor(ui.accent)
@@ -1482,14 +1482,15 @@ end
 
 gui = make('ScreenGui', { Name = 'BlockSpinCycle080', ResetOnSpawn = false, IgnoreGuiInset = true,
     ZIndexBehavior = Enum.ZIndexBehavior.Sibling }, pg)
-local window = make('Frame', { Name = 'Window', BackgroundColor3 = theme.background, BorderSizePixel = 0,
-    ClipsDescendants = true, Active = true }, gui)
+local window = make('CanvasGroup', { Name = 'Window', BackgroundColor3 = theme.background, BorderSizePixel = 0,
+    ClipsDescendants = true, Active = true, GroupTransparency = 0 }, gui)
 local menuScale = make('UIScale', { Scale = ui.scale }, window)
-round(window, 12); outline(window)
+round(window, 14); outline(window)
+
+--@@INTERFACE@@
 
 -- ANNONCES : bulles "verre" en haut au centre (au plus 3, disparaissent apres 4 s)
 do -- annonces (portee fermee : limite de 200 locales)
-local TweenService = game:GetService('TweenService')
 local toastHolder = make('Frame', { Name = 'Toasts', BackgroundTransparency = 1, AnchorPoint = Vector2.new(0.5, 0),
     Position = UDim2.new(0.5, 0, 0, 14), Size = UDim2.fromOffset(400, 200), ZIndex = 20 }, gui)
 make('UIListLayout', { Padding = UDim.new(0, 8), HorizontalAlignment = Enum.HorizontalAlignment.Center,
@@ -1497,12 +1498,7 @@ make('UIListLayout', { Padding = UDim.new(0, 8), HorizontalAlignment = Enum.Hori
 local TOAST_COLORS = { ok = Color3.fromRGB(110, 230, 150), warn = Color3.fromRGB(255, 196, 90),
     error = Color3.fromRGB(255, 110, 110), rare = Color3.fromRGB(190, 120, 255), info = Color3.fromRGB(120, 200, 255) }
 local toastSeq, lastToastText, lastToastAt = 0, nil, -100
-local function tween(o, time, props)
-    if not ui.animations then for k, v in pairs(props) do o[k] = v end; return end
-    local ok = pcall(function() TweenService:Create(o, TweenInfo.new(time, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props):Play() end)
-    if not ok then for k, v in pairs(props) do pcall(function() o[k] = v end) end end
-end
-S.animate = tween
+local tween = S.animate
 function S.toast(text, kind)
     if not ui.toasts or not toastHolder.Parent then return end
     text = tostring(text)
@@ -1542,39 +1538,48 @@ end
 local function fitWindow()
     local v, sc = viewportSize(), ui.scale
     local maxW, maxH = math.max(1, v.X / sc), math.max(1, v.Y / sc)
-    local w = clamp(window.Size.X.Offset, math.min(380, maxW), maxW)
-    local h = clamp(window.Size.Y.Offset, math.min(360, maxH), maxH)
+    local w = clamp(window.Size.X.Offset, math.min(420, maxW), maxW)
+    local h = clamp(window.Size.Y.Offset, math.min(400, maxH), maxH)
     window.Size = UDim2.fromOffset(w, h)
     window.Position = UDim2.fromOffset(clamp(window.Position.X.Offset, 0, math.max(0, v.X - w * sc)),
         clamp(window.Position.Y.Offset, 0, math.max(0, v.Y - h * sc)))
+    S.design.layout()
 end
-local size0 = ui.size or { x = 430, y = 500 }
-local pos0 = ui.position or { x = 16, y = 90 }
+-- L'ancienne taille par defaut est migree ; les tailles personnalisees restent intactes.
+if ui.size and ui.size.x == 430 and ui.size.y == 500 and not (settingsRaw and settingsRaw.layoutVersion == 2) then ui.size = nil; ui.position = nil end
+local size0 = ui.size or { x = 960, y = 640 }
+local pos0 = ui.position or { x = math.max(0,(viewportSize().X-size0.x*ui.scale)/2), y = math.max(0,(viewportSize().Y-size0.y*ui.scale)/2) }
 window.Size = UDim2.fromOffset(size0.x, size0.y)
 window.Position = UDim2.fromOffset(pos0.x, pos0.y)
 
 local accentItems = {}
 local function label(parent, text, height)
-    return make('TextLabel', { Size = UDim2.new(1, 0, 0, height or 32), BackgroundTransparency = 1, Text = text,
+    parent = S.design.parent(parent)
+    return make('TextLabel', { Size = UDim2.new(1, 0, 0, height or 32), BackgroundTransparency = 1, Text = text, LayoutOrder = S.design.order(parent),
         TextWrapped = true, TextColor3 = theme.muted, TextSize = 13, Font = Enum.Font.Gotham,
         TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Center }, parent)
 end
 local function button(parent, text, fn, height)
-    local b = make('TextButton', { Size = UDim2.new(1, 0, 0, height or 40), BackgroundColor3 = theme.control, BorderSizePixel = 0,
-        Text = text, TextColor3 = theme.text, TextSize = 14, Font = Enum.Font.GothamMedium, TextWrapped = true,
+    parent = S.design.parent(parent)
+    local b = make('TextButton', { Size = UDim2.new(1, 0, 0, height or 44), LayoutOrder = S.design.order(parent), BackgroundColor3 = theme.control, BorderSizePixel = 0,
+        Text = text, TextColor3 = theme.text, TextSize = 12, Font = Enum.Font.GothamMedium, TextWrapped = true,
         AutoButtonColor = true, TextXAlignment = Enum.TextXAlignment.Left }, parent)
-    round(b, 8); outline(b); inset(b, 14)
+    round(b, 7); outline(b); inset(b, 12)
+    S.design.hover(b, b:FindFirstChildOfClass('UIStroke'))
     connect(b.Activated, function() fn(b) end)
     return b
 end
 local function textbox(parent, placeholder)
-    local t = make('TextBox', { Size = UDim2.new(1, 0, 0, 36), BackgroundColor3 = theme.background, BorderSizePixel = 0,
+    parent = S.design.parent(parent)
+    local t = make('TextBox', { Size = UDim2.new(1, 0, 0, 40), LayoutOrder = S.design.order(parent), BackgroundColor3 = theme.background, BorderSizePixel = 0,
         Text = '', PlaceholderText = placeholder, ClearTextOnFocus = false, PlaceholderColor3 = theme.muted,
         TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = theme.text, TextSize = 13, Font = Enum.Font.Gotham }, parent)
     round(t, 7); outline(t); inset(t, 14)
     return t
 end
 local function section(parent, text)
+    local heading = S.design.section(parent, text)
+    if heading then return heading end
     local h = label(parent, text, 24)
     h.TextSize, h.TextColor3, h.Font = 11, theme.accent, Enum.Font.GothamBold
     table.insert(accentItems, h)
@@ -1583,20 +1588,24 @@ end
 local function notice(parent, text, height)
     local n = label(parent, text, height or 52)
     n.BackgroundTransparency, n.BackgroundColor3, n.TextColor3 = 0, theme.surface, theme.muted
-    n.TextYAlignment = Enum.TextYAlignment.Top
-    round(n, 8); outline(n); inset(n, 12)
+    n.TextYAlignment = Enum.TextYAlignment.Center
+    n.BackgroundColor3 = theme.control
+    round(n, 7); inset(n, 12)
     return n
 end
 local toggles = {}
 local function toggle(parent, textFn, fn, height)
-    local b = button(parent, textFn(), function(b) fn(); b.Text = textFn() end, height)
-    table.insert(toggles, function() local t = textFn(); if b.Text ~= t then b.Text = t end end)
+    local row
+    local b = button(parent, textFn(), function(b) fn(); row.paint(textFn()); S.design.layout() end, height or 50)
+    row = S.design.decorateRow(b, textFn())
+    table.insert(toggles, function() local t = textFn(); if b.Text ~= t then row.paint(t) end end)
     return b
 end
 function S.refreshToggles() for _, f in ipairs(toggles) do pcall(f) end end
 local function grid(parent, items, h)
-    h = h or 38
-    local holder = make('Frame', { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, math.ceil(#items / 2) * (h + 6)) }, parent)
+    parent = S.design.parent(parent)
+    h = h or 44
+    local holder = make('Frame', { BackgroundTransparency = 1, LayoutOrder = S.design.order(parent), Size = UDim2.new(1, 0, 0, math.ceil(#items / 2) * (h + 6)) }, parent)
     for i, it in ipairs(items) do
         local b = button(holder, it[1], it[2], h)
         b.Size = UDim2.new(0.5, -4, 0, h)
@@ -1605,55 +1614,32 @@ local function grid(parent, items, h)
     return holder
 end
 
--- en-tete : titre (sert a deplacer) + FPS
-local top = make('Frame', { Size = UDim2.new(1, 0, 0, 50), BackgroundColor3 = theme.surface, BorderSizePixel = 0, Active = true }, window)
-local title = label(top, 'BLOCKSPIN', 26)
-title.Position = UDim2.fromOffset(16, 4); title.Size = UDim2.new(1, -170, 0, 26)
-title.TextSize, title.Font, title.TextColor3 = 18, Enum.Font.GothamBold, theme.text
-local sub = label(top, 'v' .. VERSION .. '  /  ' .. ui.hotkey .. ' : masquer', 14)
-sub.Position = UDim2.fromOffset(16, 30); sub.Size = UDim2.new(1, -170, 0, 14); sub.TextSize = 10
-local metrics = label(top, 'FPS --', 24)
-metrics.Size = UDim2.fromOffset(140, 24); metrics.Position = UDim2.new(1, -152, 0, 13)
-metrics.TextSize, metrics.TextColor3, metrics.TextXAlignment = 11, theme.muted, Enum.TextXAlignment.Right
-metrics.Visible = ui.metrics
--- onglets en haut (3 seulement)
-local tabBar = make('Frame', { Position = UDim2.fromOffset(10, 56), Size = UDim2.new(1, -20, 0, 72), BackgroundTransparency = 1 }, window)
--- pied : etat du script
-local footer = make('Frame', { Size = UDim2.new(1, 0, 0, 40), Position = UDim2.new(0, 0, 1, -40),
-    BackgroundColor3 = theme.surface, BorderSizePixel = 0 }, window)
-stateLabel = label(footer, 'demarrage', 38)
-stateLabel.Position = UDim2.fromOffset(14, 1); stateLabel.Size = UDim2.new(1, -50, 0, 38)
-stateLabel.TextSize, stateLabel.TextColor3, stateLabel.Font = 12, theme.accent, Enum.Font.Code
-table.insert(accentItems, stateLabel)
-local resize = make('TextButton', { Text = '<>', TextSize = 13, TextColor3 = theme.text, BackgroundColor3 = theme.control,
-    Size = UDim2.fromOffset(24, 24), Position = UDim2.new(1, -30, 1, -32), ZIndex = 5 }, window)
+-- Barre laterale, profil Roblox et en-tete editorial.
+S.design.createChrome()
+local top = S.design.dragHandle
+local title = S.design.brandTitle
+local sub = S.design.versionLabel
+local metrics = S.design.metrics
+local tabBar = S.design.nav
+local footer = S.design.footer
+stateLabel = S.design.stateLabel
+local resize = S.design.resize
 
 local pages, tabButtons, pageOrder = {}, {}, {}
 local activePage = 'Fishing'
 local function updateTabs()
-    for name, b in pairs(tabButtons) do
-        local sel = name == activePage
-        S.animate(b, 0.18, { BackgroundColor3 = sel and theme.accent or theme.control })
-        b.TextColor3 = sel and theme.background or theme.text
-        pages[name].Visible = sel
-    end
+    S.design.navigation(pages, activePage)
 end
-local TAB_NAMES = { 'Fishing', 'Vehicle', 'Money', 'Farming', 'Statistics', 'Settings' }
 local function page(name)
     local body = make('ScrollingFrame', { Name = name, BackgroundTransparency = 1, BorderSizePixel = 0,
-        Position = UDim2.fromOffset(12, 136), Size = UDim2.new(1, -24, 1, -184), CanvasSize = UDim2.new(),
-        AutomaticCanvasSize = Enum.AutomaticSize.Y, ScrollBarThickness = 3, ScrollBarImageColor3 = theme.border, Visible = false }, window)
-    make('UIListLayout', { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }, body)
-    make('UIPadding', { PaddingRight = UDim.new(0, 6), PaddingBottom = UDim.new(0, 12) }, body)
+        Position = UDim2.fromOffset(0, 0), Size = UDim2.fromScale(1, 1), CanvasSize = UDim2.new(),
+        AutomaticCanvasSize = Enum.AutomaticSize.Y, ScrollBarThickness = 3, ScrollBarImageColor3 = theme.border, Visible = false }, S.design.content)
+    make('UIListLayout', { Padding = UDim.new(0, 16), SortOrder = Enum.SortOrder.LayoutOrder }, body)
+    make('UIPadding', { PaddingRight = UDim.new(0, 6), PaddingBottom = UDim.new(0, 16) }, body)
     pages[name] = body
     pageOrder[#pageOrder + 1] = name
-    local i = 1; for j, n in ipairs(TAB_NAMES) do if n == name then i = j end end
-    local tb = make('TextButton', { Size = UDim2.new(1 / 3, -4, 0, 34), Position = UDim2.new((i - 1) % 3 / 3, 2, 0, math.floor((i - 1) / 3) * 38),
-        BackgroundColor3 = theme.control, BorderSizePixel = 0, Text = name, TextColor3 = theme.text, TextSize = 13,
-        Font = Enum.Font.GothamBold }, tabBar)
-    round(tb, 8)
-    connect(tb.Activated, function() activePage = name; updateTabs() end)
-    tabButtons[name] = tb
+    S.design.addPage(body, name)
+    tabButtons[name] = S.design.navButton(name, function() activePage = name; updateTabs() end)
     return body
 end
 
@@ -1661,7 +1647,7 @@ end
 -- ACCUEIL
 ---------------------------------------------------------------------------
 local home = page('Fishing')
-infoLabel = notice(home, '', 58)
+infoLabel = notice(home, '', 76)
 toggle(home, function() return (S.fishingEnabled and '[ON]  ' or '[OFF] ') .. 'Peche automatique' end,
     function() S.fishingEnabled = not S.fishingEnabled end, 44)
 toggle(home, function() return (S.autoCycle and '[ON]  ' or '[OFF] ') .. 'Vente auto quand l\'inventaire est plein' end,
@@ -1801,7 +1787,7 @@ section(index, 'STATISTIQUES PAR SPOT (SESSION)')
 S.views.spotStats = notice(index, '', 70)
 section(index, 'JOURNAL DES ERREURS (80 MAXIMUM)')
 S.views.errors = notice(index, '', 160)
-logLabel.Parent = index
+logLabel.Parent = S.design.parent(index)
 section(index, 'POISSONS (liste web, non verifiee en jeu)')
 local lines = {}
 for _, f in ipairs(FISH_WEB) do lines[#lines + 1] = string.format('%s  |  %s  |  %s', f[1], f[2], f[3]) end
@@ -1829,10 +1815,11 @@ end
 ---------------------------------------------------------------------------
 local settingsPage = page('Settings')
 section(settingsPage, 'BLACK EDITION / COULEUR')
-local PALETTE = { 'C5F277', '5EC8FF', 'B07CFF', 'FF6FA8', 'FF9F43', 'FFD84D', '4DE0A0', 'F1F4EF' }
+local PALETTE = { 'FF475C', 'C5F277', '5EC8FF', 'B07CFF', 'FF6FA8', 'FF9F43', 'FFD84D', '4DE0A0', 'F1F4EF' }
 local function applyAccent(hex)
     theme.accent = hexColor(hex)
     for _, it in ipairs(accentItems) do it.TextColor3 = theme.accent end
+    S.design.applyAccent()
     updateTabs()
 end
 do
@@ -1843,9 +1830,9 @@ button(settingsPage, 'Appliquer mon accent', function()
     ui.accent = h; applyAccent(h); saveSettings()
 end)
 toggle(settingsPage, function() return 'Animations : ' .. (ui.animations and 'oui' or 'non') end,
-    function() ui.animations = not ui.animations; saveSettings() end)
+    function() ui.animations = not ui.animations; if not ui.animations then S.design.finishAnimations() end; saveSettings() end)
 end
-local swatches = make('Frame', { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 34) }, settingsPage)
+local swatches = make('Frame', { BackgroundTransparency = 1, LayoutOrder = S.design.order(S.design.parent(settingsPage)), Size = UDim2.new(1, 0, 0, 34) }, S.design.parent(settingsPage))
 for i, hex in ipairs(PALETTE) do
     local h = hex
     local sw = make('TextButton', { Name = 'Couleur' .. h, Text = '', BackgroundColor3 = hexColor(h), BorderSizePixel = 0,
@@ -2031,6 +2018,7 @@ function S.refreshDashboard()
         local e = h.errors[i]; lines[#lines + 1] = e.stage .. ' : ' .. e.message
     end
     if S.views.errors then S.views.errors.Text = #lines > 0 and table.concat(lines, '\n') or 'Aucune erreur enregistree cette session' end
+    S.design.refresh()
 end
 local emergency = button(gui, 'STOP / F12', S.cancel, 38)
 emergency.Name = 'EmergencyStop'; emergency.Size = UDim2.fromOffset(112, 38)
@@ -2043,6 +2031,25 @@ end
 S.window = window
 fitWindow()
 updateTabs()
+S.design.refresh()
+window.GroupTransparency = ui.animations and 1 or 0
+menuScale.Scale = ui.animations and ui.scale * 0.98 or ui.scale
+S.setMenuVisible(true)
+
+-- Recalcul lors d'un changement de camera ou de resolution Roblox.
+do
+local cameraConnection
+local function attachViewport()
+    if cameraConnection then cameraConnection:Disconnect() end
+    local camera=workspace.CurrentCamera
+    if camera and camera.GetPropertyChangedSignal then
+        cameraConnection=connect(camera:GetPropertyChangedSignal('ViewportSize'),function() fitWindow();S.design.refresh() end)
+    end
+    fitWindow()
+end
+connect(workspace:GetPropertyChangedSignal('CurrentCamera'),attachViewport)
+attachViewport()
+end
 
 -- deplacement (en-tete), redimensionnement (<>), overlay deplacable
 local gesture
@@ -2159,7 +2166,7 @@ connect(RunService.RenderStepped, function(dt)
     if ui.metrics or ui.overlay then
         local ok, ping = pcall(function() return player:GetNetworkPing() end)
         local pingText = (ok and isNum(ping) and ping >= 0) and string.format('%.0f ms', ping * 1000) or 'N/D'
-        local txt = string.format('FPS %.0f | %s', frames / elapsed, pingText)
+        local txt = string.format('FPS %.0f | Ping %s', frames / elapsed, pingText)
         metrics.Text = txt; overlay.Text = txt
     end
     if carInfo.Parent then
@@ -2312,8 +2319,8 @@ table.insert(conns, RunService.Heartbeat:Connect(function()
         local panel, target, needle = findMinigame()
         -- le menu ne doit pas recevoir les clics du mini-jeu (clic a la position du curseur)
         if panel then S.minigameSeenAt = os.clock() end
-        if panel and ui.hideInMinigame and window.Visible then window.Visible = false; S.hiddenForMinigame = true end
-        if not panel and S.hiddenForMinigame and os.clock() - (S.minigameSeenAt or 0) > 1.5 then window.Visible = true; S.hiddenForMinigame = false end
+        if panel and ui.hideInMinigame and S.design.menuVisible then S.setMenuVisible(false, true); S.hiddenForMinigame = true end
+        if not panel and S.hiddenForMinigame and os.clock() - (S.minigameSeenAt or 0) > 1.5 then S.setMenuVisible(true); S.hiddenForMinigame = false end
         if not panel then
             if minigameWasVisible then minigameWasVisible = false; lastMinigameEnd = os.clock(); S.onMinigameEnd(lastMinigameEnd) end
             if currentPanel then resetPanel(nil) end
@@ -2391,7 +2398,7 @@ connect(UIS.InputBegan, function(input, processed)
     end
     if processed or UIS:GetFocusedTextBox() then return end
     if input.KeyCode == Enum.KeyCode[ui.hotkey] then
-        window.Visible = not window.Visible
+        S.setMenuVisible(not S.design.menuVisible)
         S.hiddenForMinigame = false
         gesture = nil
     end
@@ -2424,6 +2431,7 @@ function S.stop()
     if not S.running then return end
     S.token = S.token + 1
     S.running = false
+    if S.design then S.design.cleanup() end
     S.recording = false
     S.hub.farm.running = false
     S.hub:finishStep(false, 'arret complet', os.clock())

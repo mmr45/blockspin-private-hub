@@ -1,5 +1,14 @@
 # Historique
 
+## Refonte UI 1.0.0 — 2026-11-06 (même PR)
+
+- Direction visuelle inspirée des références utilisateur : barre latérale à icônes locales, fond noir, accent rouge par défaut, cartes en colonnes, typographie et espaces revus.
+- Photo de profil Roblox via l’API officielle, DisplayName et @username du joueur connecté ; chargement et échec de miniature gérés avec un remplacement.
+- Transitions d’onglets, interrupteurs, survols, ouverture/réduction ; option sans animation, annulation des anciennes interpolations et nettoyage.
+- Réouverture par bouton « B », STOP indépendant, disposition compacte, adaptation aux changements de caméra/résolution et migration de l’ancienne taille par défaut.
+- Présentation isolée dans `src/interface.lua`, intégrée au script unique par `build.py`.
+- 251 vérifications locales réussies, dont 46 cas de contrat UI supplémentaires. Maquettes visuelles issues de l’arbre Lua inspectées ; aucun rendu Roblox réel validé.
+
 ## 1.0.0 — 2026-11-06 (validation Roblox requise)
 
 - Black Edition : six onglets, accent libre, animations désactivables et bouton STOP indépendant.

@@ -66,6 +66,12 @@ Pour développer l'intégration après observation, `S.setFarmingAdapter(adapter
 
 ## Settings, fichiers et génération
 
+L’interface utilise une barre latérale avec icônes locales, des cartes en deux colonnes, des interrupteurs animés et une disposition compacte qui empile les sections. La taille initiale est de 960 × 640, centrée et limitée à la résolution disponible. L’ancienne taille par défaut 430 × 500 migre vers ce format ; les tailles personnalisées sont conservées.
+
+Le profil affiche le `DisplayName`, le `@Name` et la photo du compte actuellement connecté. La miniature est demandée à l’API officielle `Players:GetUserThumbnailAsync`, jamais à un service tiers ; le chargement de l’image est aussi vérifié. En cas d’échec ou d’absence de chargement, un avatar de remplacement reste affiché. En mode compact, seul l’avatar reste visible dans la barre latérale.
+
+Les changements d’onglet, les interrupteurs, les survols et l’ouverture/réduction utilisent TweenService. Les interpolations précédentes sont annulées si nécessaire, puis nettoyées à leur fin ou à la fermeture. Le bouton de réduction fait apparaître un petit bouton « B » pour rouvrir le hub ; STOP reste indépendant. La réduction automatique du mini-jeu n’affiche pas ce bouton. L’option Animations désactive les transitions et applique directement leur état final.
+
 Thème noir, palette et accent libre `#RRGGBB`, animations désactivables, notifications, FPS/ping, échelle, menu redimensionnable/déplaçable et profils existants sont conservés.
 
 | Fichier local de l'exécuteur | Usage |
@@ -77,4 +83,4 @@ Thème noir, palette et accent libre `#RRGGBB`, animations désactivables, notif
 
 Une bibliothèque invalide reste intacte et bloque sa sauvegarde pendant la session. Corriger le fichier puis le recharger explicitement. Sans API fichiers, la session reste utilisable en mémoire. Aucune clé ni secret n'est requis dans le client.
 
-Développement : modifier `src/cycle.lua` et le noyau pur `src/hub_core.lua`, puis générer `src/main.lua` avec `python -I build.py`. Ne pas modifier le fichier généré à la main. Voir `tests/VALIDATION_V1.md` pour les commandes de vérification.
+Développement : modifier `src/cycle.lua` , le noyau pur `src/hub_core.lua` et la présentation `src/interface.lua`, puis générer `src/main.lua` avec `python -I build.py`. Ne pas modifier le fichier généré à la main. Voir `tests/VALIDATION_V1.md` pour les commandes de vérification.

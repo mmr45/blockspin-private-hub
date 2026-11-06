@@ -1,3 +1,12 @@
+# Refonte de présentation V1 — 2026-11-06
+
+- Demande explicite : UI soignée inspirée des captures fournies, transitions fluides, avatar Roblox, DisplayName et @username. Ajouter à la PR #4, sans fusion.
+- Présentation dans `src/interface.lua`, injectée par `build.py` avec le noyau et les trajets. `src/main.lua` reste l’unique script actif généré.
+- Barre latérale, cartes en deux colonnes, vrais interrupteurs, palette avec rouge par défaut, profils et réglages existants conservés. Mode compact, résolution/caméra suivies.
+- Miniature officielle `GetUserThumbnailAsync`, trois tentatives maximum, image réellement chargée avant masquage du remplacement, résultat tardif ignoré après fermeture.
+- Transitions annulables et nettoyées ; mode sans animation ; réduction/réouverture et STOP indépendant. Aucun nouveau raccourci ni automatisme de jeu.
+- 251 vérifications locales réussies (205 antérieures + 46 UI), build et statique réussis. Inspection de maquettes HTML issues de l’arbre Lua simulé ; **aucun rendu réel Roblox/Xeno confirmé**.
+
 # Mise à jour V1.0.0 — 2026-11-06
 
 - Base distante vérifiée : `main` 0.9.1, commit `c0da490fcbcaf60e9a9f3c3142dad508c3bd29bc`. Les mentions de `main` 0.4.0 plus bas sont historiques.
