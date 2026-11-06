@@ -1,10 +1,10 @@
--- BlockSpin Hub v1.2.0
+-- BlockSpin Hub v1.2.1
 -- Peche auto (logique v0.6.8 conservee) + cycle vente/ATM par conduite NATIVE sur route
 -- (touches simulees W/A/S/D, aucun deplacement de CFrame, aucune teleportation).
 -- Aucun passage sous la carte : non implemente volontairement (voir README_v080.md).
 -- Arret complet : getgenv().BlockSpinCycle080.stop()
 -- Arret d'urgence du cycle/conduite (le script reste charge) : F12
-local VERSION = '1.2.0'
+local VERSION = '1.2.1'
 local E = (getgenv and getgenv()) or _G
 
 ---------------------------------------------------------------------------
@@ -320,7 +320,7 @@ local S = {
     running = true, version = VERSION, state = 'IDLE', detail = '',
     clicks = 0, rounds = 0, method = '-',
     fishingEnabled = true, autoCycle = false, cycleRunning = false, cycleFailures = 0,
-    autoCast = true, castDelay = 2.5, retryDelay = 8, castAttempts = 0,
+    autoCast = true, castDelay = 0.35, retryDelay = 8, castAttempts = 0,
     inventoryLimit = 18, fishCount = nil, inventoryFull = false, paused = false,
     inventoryText = 'inconnu', inventorySource = 'none',
     baitCount = nil, baitEmpty = false, baitUnknown = true,
@@ -790,22 +790,23 @@ end
 local baitCache, baitNextScan = nil, 0
 local function checkBait()
     local found
-    if baitCache and baitCache.Parent then
+    if baitCache and baitCache.Parent and baitCache:IsDescendantOf(pg) and shown(baitCache) then
         local c = tostring(baitCache.Text):match('[xX]%s*(%d+)%s*$')
         found = tonumber(c)
     end
     if found == nil then
+        S.baitUnknown=true;S.baitEmpty=false
         if os.clock() < baitNextScan then return end
         baitNextScan = os.clock() + 10
         baitCache = nil
         for _, o in ipairs(pg:GetDescendants()) do
-            if (o:IsA('TextLabel') or o:IsA('TextButton')) and fold(o.Text):find('prawntec', 1, true) and not ours(o) then
+            if (o:IsA('TextLabel') or o:IsA('TextButton')) and fold(o.Text):find('prawntec', 1, true) and not ours(o) and shown(o) then
                 local inline = tostring(o.Text):match('[xX]%s*(%d+)%s*$')
                 if inline then found = tonumber(inline); baitCache = o end
                 local parent = o.Parent
                 if found == nil and parent then
                     for _, near in ipairs(parent:GetDescendants()) do
-                        if near:IsA('TextLabel') or near:IsA('TextButton') then
+                        if (near:IsA('TextLabel') or near:IsA('TextButton')) and shown(near) and not ours(near) then
                             local c = tostring(near.Text):match('^%s*[xX]%s*(%d+)%s*$')
                             if c then found = tonumber(c); baitCache = near; break end
                         end
@@ -1541,11 +1542,11 @@ local SETTINGS_FILE = 'blockspin-settings-v1.json'
 local ui = { accent = 'FF475C', hotkey = 'RightShift', scale = 1, metrics = true, overlay = false, hideInMinigame = true,
     speedPreset = 'Rapide', rareAction = 'none', rarePurple = true, toasts = true, animations = true, layoutVersion = 2, density = 'normal',
     privacy=false,miniDashboard=false,plantAlerts=true,plantAlertSeconds=60,plantGrouping=false,presenceAlerts=false,friendAlerts=false,rareNotifications=true,
-    serverMinFree=1,serverMaxPopulation=100,cardLayouts={},recentColors={},savedThemes={} }
+    serverMinFree=1,serverMaxPopulation=100,cardLayouts={},recentColors={},savedThemes={},aimAssist=false,recastDelay=0.35 }
 local PREF_KEYS = { 'accent', 'hotkey', 'scale', 'metrics', 'overlay', 'hideInMinigame', 'speedPreset', 'rareAction', 'rarePurple', 'toasts', 'animations',
     'position', 'size', 'overlayPosition', 'layoutVersion', 'density', 'moneySourcePath',
     'privacy','miniDashboard','plantAlerts','plantAlertSeconds','plantGrouping','presenceAlerts','friendAlerts','rareNotifications',
-    'serverMinFree','serverMaxPopulation','cardLayouts','recentColors','savedThemes' }
+    'serverMinFree','serverMaxPopulation','cardLayouts','recentColors','savedThemes','aimAssist','recastDelay' }
 local RARE_ACTIONS = { none = 'ne rien faire', leave = 'quitter le serveur', sell = 'aller vendre' }
 local settingsRaw -- fichier lu en entier : profils et champs du hub 0.4.0 conserves
 local function validKeyName(n)
@@ -1555,6 +1556,8 @@ local function validKeyName(n)
 end
 local function readPrefs(d, into)
     if type(d)~='table' then return end
+    if type(d.aimAssist)=='boolean' then into.aimAssist=d.aimAssist end
+    if isNum(d.recastDelay) and d.recastDelay>=0.2 and d.recastDelay<=3 then into.recastDelay=d.recastDelay end
     for _,k in ipairs({'privacy','miniDashboard','plantAlerts','plantGrouping','presenceAlerts','friendAlerts','rareNotifications'}) do if type(d[k])=='boolean' then into[k]=d[k] end end
     for k,range in pairs({plantAlertSeconds={10,600},serverMinFree={0,100},serverMaxPopulation={1,200}}) do if isNum(d[k]) and d[k]>=range[1] and d[k]<=range[2] then into[k]=math.floor(d[k]) end end
     if type(d.cardLayouts)=='table' then
@@ -1603,6 +1606,13 @@ end
 -- l'ancien overlay (12,12) etait cache sous les boutons Roblox en haut a gauche
 if ui.overlayPosition and ui.overlayPosition.y < 64 and ui.overlayPosition.x < 330 then ui.overlayPosition = nil end
 S.ui = ui
+S.castDelay=ui.recastDelay
+function S.setFishingAimAssist(enabled)
+    if type(enabled)~='boolean' then return false end
+    ui.aimAssist=enabled;S.aimRetryAt=0;S.castTicket=nil;S.castPending=false
+    S.fishingInputStatus=enabled and 'Visee enregistree activee' or 'Classique : lancer direct'
+    return true
+end
 S.moneySourcePath=ui.moneySourcePath
 local profiles = (type(settingsRaw) == 'table' and type(settingsRaw.profiles) == 'table') and settingsRaw.profiles or {}
 local function saveSettings()
@@ -1823,6 +1833,14 @@ local home = page('Fishing')
 section(home,'Automatisation')
 toggle(home, function() return (S.fishingEnabled and '[ON]  ' or '[OFF] ') .. 'Peche automatique' end,
     function() S.fishingEnabled = not S.fishingEnabled end, 44)
+toggle(home,function() return 'Visée enregistrée : '..(ui.aimAssist and 'oui' or 'non') end,
+    function() S.setFishingAimAssist(not ui.aimAssist);saveSettings() end)
+S.design.caption(home,'Mode classique par défaut : place le curseur vers l’eau. La visée enregistrée est facultative.')
+toggle(home,function() return string.format('Relance après une manche : %.2f s',ui.recastDelay) end,function()
+    local nextDelay=0.35
+    for _,n in ipairs({0.35,0.75,1.5,2.5}) do if n>ui.recastDelay+0.001 then nextDelay=n;break end end
+    ui.recastDelay=nextDelay;S.castDelay=nextDelay;saveSettings()
+end)
 toggle(home, function() return (S.autoCycle and '[ON]  ' or '[OFF] ') .. 'Vente auto quand l\'inventaire est plein' end,
     function() S.autoCycle = not S.autoCycle; S.cycleFailures = 0; logLine('Vente auto ' .. (S.autoCycle and 'activee' or 'desactivee')) end, 44)
 toggle(home, function() return 'Poisson rare : ' .. RARE_ACTIONS[ui.rareAction] end,
@@ -2118,6 +2136,7 @@ local function profileName()
     return n
 end
 local function applyPrefs()
+    S.castDelay=ui.recastDelay;S.setFishingAimAssist(ui.aimAssist)
     menuScale.Scale = ui.scale
     applyAccent(ui.accent)
     overlay.Visible = ui.overlay
@@ -2490,7 +2509,14 @@ local function sendClick(tok,target,panel,epoch)
         VIM:SendMouseButtonEvent(point.X,point.Y,0,false,game,0)
         mouseHeld=false;mouseHeldVia=nil
     end)
-    if ok then return true,'VirtualInputManager (barre)' end
+    if ok then
+        -- Le clic vise la barre ; il ne doit pas laisser la prochaine canne viser cette barre.
+        -- Aucun deplacement vers une autre fenetre, aucune nouvelle tentative de clic si ce retour echoue.
+        if alive(tok) and S.inputEpoch==epoch and S.isFishingInputActive() and pointerInside(original) then
+            pcall(function() VIM:SendMouseMoveEvent(original.X,original.Y,game) end)
+        end
+        return true,'VirtualInputManager (barre)'
+    end
     releaseMouse()
     if pressed then return false,'Relachement natif refuse : clic non repete' end
     -- Compatibilite historique seulement si le vrai curseur etait deja dans la barre
@@ -2504,6 +2530,7 @@ end
 local lastMinigameEnd,minigameWasVisible=nil,false
 local firstCastAt=os.clock()+3
 local function aimAtSavedPoint(tok,epoch)
+    if not ui.aimAssist then return true end -- comportement classique, sans dependance a Mouse.Hit ni spot obligatoire
     local aim=S.fishingAim
     if not aim and S.baitScreenPoint then aim={x=S.baitScreenPoint.X,y=S.baitScreenPoint.Y} end
     if not aim then
@@ -2545,10 +2572,10 @@ local function tryCast(now)
         local worked,err=pcall(function()
             local aimed,why=aimAtSavedPoint(tok,epoch)
             if not aimed then if alive(tok) and S.inputEpoch==epoch then S.aimRetryAt=os.clock()+2;S.fishingInputStatus=why;update(why) end;return end
-            if not alive(tok) or S.inputEpoch~=epoch or not S.isFishingInputActive() or S.paused or S.inventoryFull or S.cycleRunning or not S.fishingEnabled then return end
+            if S.castTicket~=ticket or not alive(tok) or S.inputEpoch~=epoch or not S.isFishingInputActive() or S.paused or S.inventoryFull or S.cycleRunning or not S.fishingEnabled then return end
             lastCast=os.clock();S.castAttempts=S.castAttempts+1;S.spotEvent('casts')
             local activated,why2=pcall(function() tool:Activate() end)
-            S.fishingInputStatus=activated and 'Lancer avec visee confirmee' or tostring(why2)
+            S.fishingInputStatus=activated and (ui.aimAssist and 'Canne activee · visee enregistree' or 'Canne activee · classique') or tostring(why2)
             update(activated and ('lancer '..S.castAttempts..' ('..tool.Name..')') or ('Erreur lancer : '..tostring(why2)))
         end)
         if S.castTicket==ticket then S.castPending=false end
@@ -2630,7 +2657,12 @@ table.insert(conns, RunService.Heartbeat:Connect(function()
         if panel and ui.hideInMinigame and S.design.menuVisible then S.setMenuVisible(false, true); S.hiddenForMinigame = true end
         if not panel and S.hiddenForMinigame and os.clock() - (S.minigameSeenAt or 0) > 1.5 then S.setMenuVisible(true); S.hiddenForMinigame = false end
         if not panel then
-            if minigameWasVisible then minigameWasVisible = false; lastMinigameEnd = os.clock(); S.onMinigameEnd(lastMinigameEnd) end
+            if minigameWasVisible then
+                minigameWasVisible=false;lastMinigameEnd=os.clock()
+                -- Une manche observee est terminee : le delai de retry sans reponse ne s'applique plus.
+                lastCast=-1e6;firstCastAt=math.min(firstCastAt,lastMinigameEnd)
+                S.onMinigameEnd(lastMinigameEnd)
+            end
             if currentPanel then resetPanel(nil) end
             tryCast(os.clock())
             return

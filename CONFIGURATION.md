@@ -1,6 +1,6 @@
-# Configuration et travail restant — V1.2.0
+# Configuration et travail restant — V1.2.1
 
-Mis à jour le 6 novembre 2026. Ce document distingue les réglages utilisateur, les branchements internes et les essais Roblox. Le code V1.2 est testé hors jeu ; aucune confirmation Roblox/Xeno de cette version.
+Mis à jour le 6 novembre 2026. Ce document distingue les réglages utilisateur, les branchements internes et les essais Roblox. Le code V1.2.1 est testé hors jeu ; aucune confirmation Roblox/Xeno de cette version.
 
 ## Ce que cette version apporte
 
@@ -21,11 +21,12 @@ Mis à jour le 6 novembre 2026. Ce document distingue les réglages utilisateur,
 
 ### Pêche
 
-1. Enregistrer un spot, sélectionner ce spot et capturer la visée vers l'eau après le délai de 3 secondes.
+1. Par défaut, utiliser le lancer classique et placer le curseur vers l’eau : aucun spot ni lecture Mouse.Hit n’est obligatoire. Pour employer les points enregistrés, activer explicitement « Visée enregistrée », sélectionner le spot et capturer sa visée après 3 secondes.
 2. Sauvegarder explicitement la bibliothèque pour conserver spots et destinations. Une capture après création actualise le spot en mémoire.
 3. Régler pêche automatique, cycle automatique et action sur signal rare. Par défaut, le signal rare ne déclenche ni vente ni sortie.
 4. Laisser Roblox au premier plan pour les entrées de pêche. La perte de focus suspend les entrées ; le script ne force pas le focus.
-5. Les compteurs de lancers, clics, textes et signaux rares sont des observations distinctes. Ils ne constituent pas un nombre garanti de poissons capturés.
+5. Relance après une manche : 0,35 s par défaut, réglable dans Fishing (0,75 / 1,5 / 2,5 s). Le retry 8 s reste appliqué aux tentatives sans mini-jeu ; un ancien zéro d’appâts devenu invisible ne bloque plus.
+6. Les compteurs de lancers, clics, textes et signaux rares sont des observations distinctes. Ils ne constituent pas un nombre garanti de poissons capturés.
 
 ### Véhicule et itinéraires
 
@@ -138,4 +139,4 @@ python -I tests/run_tests.py
 git diff --check
 ```
 
-Installer `requirements-test.txt` dans un venv pour les tests (`lupa==2.8`). Voir `tests/VALIDATION_V12.md` et `tests/MANUAL.md`. Livrer par PR vers main ; ne pas fusionner automatiquement.
+Installer `requirements-test.txt` dans un venv pour les tests (`lupa==2.8`). Voir `tests/VALIDATION_V121.md`, `tests/VALIDATION_V12.md` et `tests/MANUAL.md`. Livrer par PR vers main ; ne pas fusionner automatiquement.

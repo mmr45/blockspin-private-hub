@@ -91,3 +91,13 @@ Aucun cas de cette version n'a été exécuté en jeu. Consigner chaque résulta
 51. Mini-dashboard : déplacer, ouvrir le hub et STOP ; tester petit écran, animation désactivée et menu masqué. Vérifier qu’il n’intercepte pas une cible de pêche.
 52. File : pause puis trajet, erreurs et délais, STOP avant la prochaine étape. Une échéance calculée ne valide pas une plante prête. Cycle réel puis pause suivante uniquement après validation individuelle du vendeur, ATM et trajets.
 53. Après chaque série noter version, date, résultat et capture ; ne pas convertir une réussite en simulation en confirmation du jeu réel. Remplir les points P0/P1 de CONFIGURATION.md à partir de ces observations.
+
+
+## V1.2.1 — retour à la relance classique (à vérifier dans Roblox)
+
+54. Charger V1.2.1, garder « Visée enregistrée : non », mettre la canne et placer le curseur vers l’eau. Un spot sans visée ou une ancienne capture ne doit plus empêcher le lancer.
+55. Faire au moins quatre manches courtes sans déplacer manuellement la souris : vérifier que le curseur revient après le clic et que la canne se relance environ 0,35 s après disparition du panneau. Consigner le délai réellement observé, sans confondre activation et appât réellement apparu.
+56. Si le jeu refuse cette vitesse, régler 0,75 puis 1,5 s. Sans réponse du mini-jeu, vérifier que les tentatives restent espacées de 8 s.
+57. Vérifier un vrai zéro d’appâts visible, puis fermer son affichage/restocker. Une ancienne valeur cachée ne doit pas rester bloquante. Vérifier que le jeu refuse naturellement un lancer sans appât.
+58. STOP, perte de focus, inventaire plein, saisie de texte et changement de mode pendant un lancer différé : aucun lancer parasite. Le curseur ne doit jamais être déplacé par le correctif vers une autre application.
+59. En option seulement, activer la visée enregistrée et vérifier les contrôles stricts. La désactiver doit rendre le lancer classique sans effacer les spots. Recharger un profil et vérifier les deux nouveaux réglages.

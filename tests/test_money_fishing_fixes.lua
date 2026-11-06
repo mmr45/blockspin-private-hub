@@ -5,7 +5,9 @@ local function fresh(before)
     mouse1click=nil;mouse1press=nil;mouse1release=nil;isrbxactive=nil
     M.setCar(Car.new(-350.97,844.32,20));M.setRoot(Vector3.new(-334.87,254.78,836.06))
     if before then before(M) end
-    load(SCRIPT_SOURCE,'=fix-client')();M.run(0.5)
+    load(SCRIPT_SOURCE,'=fix-client')()
+    -- Les scenarios de visee stricte de 1.1.1 restent testes en mode facultatif.
+    M.genv.BlockSpinCycle080.setFishingAimAssist(true);M.run(0.5)
     return M,M.genv.BlockSpinCycle080
 end
 local M,S=fresh()

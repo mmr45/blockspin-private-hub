@@ -17,7 +17,7 @@ local function plant(m,name,seconds,pct)
 end
 local M,S=fresh()
 local O=S.observatory
-check('V1.2 : chargement et une seule boucle principale',S.version=='1.2.0' and M.RunService.Heartbeat:count()==1 and M.Players.PlayerAdded:count()==1)
+check('V1.2 : chargement et une seule boucle principale',S.version=='1.2.1' and M.RunService.Heartbeat:count()==1 and M.Players.PlayerAdded:count()==1)
 check('V1.2 : aucune ecriture des nouvelles observations au chargement',M.fs['blockspin-observatory-v1.json']==nil)
 local writes=M.writes
 local part,panel,t,p=plant(M,'PlotA','02:00','50%')

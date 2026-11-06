@@ -1,3 +1,19 @@
+# Correctif V1.2.1 — relance pêche
+
+Le lancer **classique** revient par défaut. Place le curseur vers l’eau : aucun spot ni contrôle Mouse.Hit n’est imposé à la canne. Le clic du mini-jeu vise toujours sa barre puis tente de remettre le curseur à sa position initiale dans Roblox.
+
+Dans **Fishing** :
+
+- **Visée enregistrée : non** = classique, conseillé pour tester le retour au comportement précédent. Les spots et captures existants restent enregistrés.
+- **Visée enregistrée : oui** = assistance avec projection et contrôles stricts, facultative ; capturer alors la visée du spot.
+- **Relance après une manche** = 0,35 s par défaut ; cliquer pour choisir 0,75 / 1,5 / 2,5 s. Si le jeu exige plus de temps, augmenter ce délai.
+
+Les 8 s de retry ne sont plus imposées à la première relance après une manche observée. Elles restent entre tentatives quand aucun mini-jeu n’apparaît. Un zéro d’appâts réellement visible suspend la pêche ; un ancien zéro dont la source n’est plus lisible devient inconnu. L’inventaire plein, STOP/F12 et la perte de focus restent prioritaires.
+
+**511 vérifications hors Roblox, aucune confirmation du correctif en jeu.** Voir [tests/VALIDATION_V121.md](tests/VALIDATION_V121.md).
+
+---
+
 # Nouveautés V1.2.0 : configuration guidée
 
 Voir [CONFIGURATION.md](CONFIGURATION.md) pour tous les réglages et le travail interne restant.

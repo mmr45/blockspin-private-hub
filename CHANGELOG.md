@@ -1,3 +1,13 @@
+# V1.2.1 — 2026-11-06
+
+- Pêche classique par défaut : retire l’obligation de visée stricte qui peut bloquer la canne sur un Mouse.Hit figé ou un spot sans capture. Visée enregistrée disponible en option explicite.
+- Clic du mini-jeu ciblé sur la barre puis restauration du curseur initial dans Roblox.
+- Relance 0,35 s après disparition du mini-jeu, réglable dans Fishing. Le délai de 8 s reste réservé aux nouvelles tentatives sans réponse.
+- Un ancien zéro d’appâts caché ou disparu ne suspend plus la pêche ; zéro visible, STOP, focus et inventaire plein restent respectés.
+- 511 vérifications locales réussies ; correctif à valider dans Roblox/Xeno. Aucun fonctionnement en arrière-plan ni capture garantie annoncé.
+
+---
+
 # V1.2.0 — 2026-11-06
 
 - Observatoire agricole : recherche de sources réelles, liaison explicite, cartes temps/%/distance, estimations signalées, alertes, recalage et restauration isolée par serveur. Lecteur en lecture seule prêt à intégrer ; les vrais signaux BlockSpin et l’adaptateur d’actions agricoles restent à fournir.
