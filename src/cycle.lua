@@ -1,10 +1,10 @@
--- BlockSpin Hub v1.0.0
+-- BlockSpin Hub v1.1.0
 -- Peche auto (logique v0.6.8 conservee) + cycle vente/ATM par conduite NATIVE sur route
 -- (touches simulees W/A/S/D, aucun deplacement de CFrame, aucune teleportation).
 -- Aucun passage sous la carte : non implemente volontairement (voir README_v080.md).
 -- Arret complet : getgenv().BlockSpinCycle080.stop()
 -- Arret d'urgence du cycle/conduite (le script reste charge) : F12
-local VERSION = '1.0.0'
+local VERSION = '1.1.0'
 local E = (getgenv and getgenv()) or _G
 
 ---------------------------------------------------------------------------
@@ -1006,6 +1006,7 @@ local function cancelAll(reason)
     if reason then logLine('ANNULATION : ' .. reason) end
 end
 S.cancel = function()
+    if S.design and S.design.cancelPointer then S.design.cancelPointer() end
     cancelAll('demande utilisateur (F12)')
     S.autoCycle = false
     S.paused = true
@@ -1394,9 +1395,9 @@ end
 ---------------------------------------------------------------------------
 local SETTINGS_FILE = 'blockspin-settings-v1.json'
 local ui = { accent = 'FF475C', hotkey = 'RightShift', scale = 1, metrics = true, overlay = false, hideInMinigame = true,
-    speedPreset = 'Rapide', rareAction = 'none', rarePurple = true, toasts = true, animations = true, layoutVersion = 2 }
+    speedPreset = 'Rapide', rareAction = 'none', rarePurple = true, toasts = true, animations = true, layoutVersion = 2, density = 'normal' }
 local PREF_KEYS = { 'accent', 'hotkey', 'scale', 'metrics', 'overlay', 'hideInMinigame', 'speedPreset', 'rareAction', 'rarePurple', 'toasts', 'animations',
-    'position', 'size', 'overlayPosition', 'layoutVersion' }
+    'position', 'size', 'overlayPosition', 'layoutVersion', 'density' }
 local RARE_ACTIONS = { none = 'ne rien faire', leave = 'quitter le serveur', sell = 'aller vendre' }
 local settingsRaw -- fichier lu en entier : profils et champs du hub 0.4.0 conserves
 local function validKeyName(n)
@@ -1405,6 +1406,7 @@ local function validKeyName(n)
     return ok and k ~= nil
 end
 local function readPrefs(d, into)
+    if d.density=='normal' or d.density=='compact' then into.density=d.density end
     if type(d.accent) == 'string' and d.accent:match('^%x%x%x%x%x%x$') then into.accent = d.accent end
     if validKeyName(d.hotkey) then into.hotkey = d.hotkey end
     if isNum(d.scale) and d.scale >= 0.75 and d.scale <= 1.5 then into.scale = d.scale end
@@ -1647,7 +1649,7 @@ end
 -- ACCUEIL
 ---------------------------------------------------------------------------
 local home = page('Fishing')
-infoLabel = notice(home, '', 76)
+section(home,'Automatisation')
 toggle(home, function() return (S.fishingEnabled and '[ON]  ' or '[OFF] ') .. 'Peche automatique' end,
     function() S.fishingEnabled = not S.fishingEnabled end, 44)
 toggle(home, function() return (S.autoCycle and '[ON]  ' or '[OFF] ') .. 'Vente auto quand l\'inventaire est plein' end,
@@ -1660,11 +1662,12 @@ toggle(home, function() return 'Poisson rare : ' .. RARE_ACTIONS[ui.rareAction] 
     end, 44)
 toggle(home, function() return 'Vitesse voiture : ' .. S.speedPreset end,
     function() S.nextSpeedPreset(); ui.speedPreset = S.speedPreset; saveSettings() end, 44)
-local stopBtn = button(home, 'STOP  (tout annuler, F12)', function() S.cancel() end, 44)
-stopBtn.BackgroundColor3 = theme.danger
-stopBtn.TextXAlignment = Enum.TextXAlignment.Center
-section(home, 'JOURNAL')
+section(home,'Session de pêche')
+S.design.gauge(home,'inventory','Inventaire')
+S.design.metricsGrid(home,{{id='casts',label='LANCERS'},{id='clicks',label='CLICS MINI-JEU'}})
+S.design.detail(home,'activeSpot','Spot actif','Aucun spot')
 logLabel = notice(home, '', 128)
+logLabel.Visible = false
 logLabel.TextSize = 11; logLabel.Font = Enum.Font.Code
 
 ---------------------------------------------------------------------------
@@ -1675,7 +1678,7 @@ local function result(ok, message)
     logLine(text); if S.toast then S.toast(text, ok and 'ok' or 'warn') end
 end
 section(home, 'SPOTS DE PECHE')
-notice(home, 'Enregistre la position et l\'orientation du personnage, avec la visee ecran si definie. Aucune position d\'hamecon deduite.', 64)
+S.design.caption(home,'Enregistre cet endroit avec sa visée, puis retrouve-le ici.')
 local spotName = textbox(home, 'Nom du spot')
 grid(home, {
     { 'Enregistrer ce spot', function() result(S.saveSpot(spotName.Text)) end },
@@ -1695,12 +1698,14 @@ end)
 button(home, 'Reprendre la peche apres STOP', function()
     result(S.resume(), S.inventoryFull and 'Inventaire plein : liberer avant de reprendre' or 'Reprise demandee')
 end)
-S.views.spots = notice(home, '', 80)
+S.design.rowList(home,'spots',5,'Aucun spot enregistré').onSelect=function(row) spotName.Text=row.title end
+S.design.detail(home,'spotsCount','Spots enregistrés','0')
 
 local vehicle = page('Vehicle')
 section(vehicle, 'AUTO DRIVE V2')
-notice(vehicle, 'Conduite native W/A/S/D. Vitesse cible en studs/s, non calibree. Stationnement = freinage au dernier point ; orientation finale non geree.', 70)
-S.views.routes = notice(vehicle, '', 70)
+S.design.detail(vehicle,'carName','Véhicule','Aucun véhicule')
+S.design.metricsGrid(vehicle,{{id='vehicleSpeed',label='VITESSE MESURÉE'},{id='recordedPoints',label='POINTS ENREGISTRÉS'}})
+S.design.gauge(vehicle,'drive','Progression du trajet')
 grid(vehicle, {
     { 'Memoriser voiture actuelle', function() result(rememberCar()) end },
     { 'Tester ALLER', function() result(testDrive('aller')) end },
@@ -1715,7 +1720,10 @@ toggle(vehicle, function() return S.recording and ('Enregistrement : ' .. #S.rec
         S.recording = not S.recording
         if S.recording then S.recordBuffer = {} end
     end)
+section(vehicle,'Destinations')
+S.design.rowList(vehicle,'routes',6,'Aucune destination enregistrée')
 local routeName = textbox(vehicle, 'Nom de destination')
+S.design.lists.routes.onSelect=function(row) routeName.Text=row.title end
 grid(vehicle, {
     { 'Conserver le trajet nomme', function() result(S.saveNamedRoute(routeName.Text)) end },
     { 'Conduire vers destination', function() result(S.driveNamedRoute(routeName.Text)) end },
@@ -1725,8 +1733,11 @@ grid(vehicle, {
 
 local money = page('Money')
 section(money, 'MONEY MANAGER / SESSION')
-S.views.money = notice(money, '', 144)
-notice(money, 'Gains = hausse du solde observee pendant une vente avec baisse d\'inventaire. Depot = baisse du solde apres confirmation ATM (heuristique). Montants inconnus exclus. Taux horaire apres 60 s.', 100)
+S.design.metricsGrid(money,{{id='cash',label='PORTEFEUILLE OBSERVÉ'},{id='earned',label='GAINS DE VENTES'},{id='deposited',label='TOTAL DÉPOSÉ'},{id='hourly',label='ESTIMATION / HEURE'}})
+S.views.money = S.design.widgets.cash
+S.design.caption(money,'Montants observés · estimation après 60 secondes')
+section(money,'Ventes & dépôts')
+S.design.metricsGrid(money,{{id='sales',label='VENTES MESURÉES'},{id='deposits',label='DÉPÔTS OBSERVÉS'},{id='baitUsed',label='APPÂTS EN MOINS'},{id='baitAdded',label='APPÂTS AJOUTÉS'}})
 button(money, 'Actualiser le solde observe', function() result(S.refreshMoney()) end)
 button(money, 'Lancer le cycle vente / ATM / retour', function() result(S.runCycle()) end)
 toggle(money, function() return 'Depot ATM : ' .. (S.autoBank and 'actif' or 'inactif') end,
@@ -1736,8 +1747,9 @@ toggle(money, function() return 'Exiger une preuve de depot : ' .. (S.depositReq
 
 local farming = page('Farming')
 section(farming, 'AUTO FARM / ADAPTATEUR REQUIS')
-notice(farming, 'Integration BlockSpin indisponible : plantation et recolte reelles non observees. Le moteur peut etre teste avec un adaptateur local. Diagnostic requis avant une integration au jeu.', 90)
-S.views.farm = notice(farming, '', 70)
+S.design.badge(farming,'farmStatus','Culture automatique','Indisponible')
+S.design.caption(farming,'Interactions de plantation et récolte à identifier dans le jeu.')
+S.design.metricsGrid(farming,{{id='farmPlanted',label='PLANTATIONS'},{id='farmHarvested',label='RÉCOLTES'}})
 local planBox = textbox(farming, 'Parcelles : A:Corn, B:Pumpkin')
 local replant = true
 toggle(farming, function() return 'Replantation : ' .. (replant and 'oui' or 'non') end, function() replant = not replant end)
@@ -1781,38 +1793,58 @@ local PLANTS_WEB = {
     { 'Citrouille (Pumpkin)', 'gains annonces par des joueurs, non verifies' },
 }
 local index = page('Statistics')
-section(index, 'AFK DASHBOARD / SESSION')
-S.views.dashboard = notice(index, '', 110)
+S.views.dashboard = section(index, 'Session')
+S.design.metricsGrid(index,{{id='session',label='DURÉE'},{id='errorsCount',label='ERREURS'}})
+S.design.detail(index,'activity','Activité','Prêt')
+section(index,'Performances')
+S.design.chart(index,'fps','Images par seconde')
+S.design.chart(index,'ping','Ping vers le serveur')
 section(index, 'STATISTIQUES PAR SPOT (SESSION)')
-S.views.spotStats = notice(index, '', 70)
+S.design.rowList(index,'spotStats',8,'Aucune mesure par spot')
 section(index, 'JOURNAL DES ERREURS (80 MAXIMUM)')
-S.views.errors = notice(index, '', 160)
+S.design.rowList(index,'errors',6,'Aucune erreur observée')
+S.views.errors = S.design.lists.errors.root
+section(index,'Diagnostic')
+button(index,'Afficher / masquer le journal technique',function() logLabel.Visible=not logLabel.Visible;S.design.layout() end)
 logLabel.Parent = S.design.parent(index)
-section(index, 'POISSONS (liste web, non verifiee en jeu)')
+logLabel.LayoutOrder = S.design.order(logLabel.Parent)
+section(index, 'Catalogue indicatif')
+S.design.caption(index,'Sources web · informations à confirmer en jeu')
 local lines = {}
 for _, f in ipairs(FISH_WEB) do lines[#lines + 1] = string.format('%s  |  %s  |  %s', f[1], f[2], f[3]) end
-notice(index, table.concat(lines, '\n'), #FISH_WEB * 16 + 14)
+do
+local rows={};for _,f in ipairs(FISH_WEB) do rows[#rows+1]={title=f[1],sub=f[2],badge=f[3]} end
+S.design.rowList(index,'catalogFish',8,'Aucun poisson référencé'):set(rows)
+end
 section(index, 'VUS PENDANT TES PECHES (textes apparus apres une prise)')
-local seenLabel = notice(index, '', 60)
+local seenList = S.design.rowList(index,'seenFish',10,'Aucun texte de prise observé')
 refreshFishLog = function()
     local names = {}
     for k, v in pairs(S.fishLog) do names[#names + 1] = { k, v } end
     table.sort(names, function(a, b) return a[2] > b[2] end)
     local t = {}
     for i = 1, math.min(15, #names) do t[#t + 1] = names[i][1] .. '  x' .. names[i][2] end
-    seenLabel.Text = #t == 0 and 'Rien encore : la liste se remplit pendant que tu peches.' or table.concat(t, '\n')
-    seenLabel.Size = UDim2.new(1, 0, 0, math.max(40, #t * 16 + 14))
+    local rows={};for i=1,math.min(10,#names) do rows[#rows+1]={title=names[i][1],sub='Texte observé',badge='x'..names[i][2]} end
+    seenList:set(rows)
 end
 refreshFishLog()
-section(index, 'PLANTES (liste web, non verifiee ; culture auto non disponible)')
+section(index, 'Plantes référencées')
 lines = {}
 for _, p in ipairs(PLANTS_WEB) do lines[#lines + 1] = p[1] .. '  |  ' .. p[2] end
-notice(index, table.concat(lines, '\n'), #PLANTS_WEB * 16 + 14)
+do
+local rows={};for _,plant in ipairs(PLANTS_WEB) do rows[#rows+1]={title=plant[1],sub='Référence web non validée',badge='À VALIDER'} end
+S.design.rowList(index,'catalogPlants',3,'Aucune plante référencée'):set(rows)
+end
 end
 
 ---------------------------------------------------------------------------
 -- REGLAGES
 ---------------------------------------------------------------------------
+do
+local serverPage = page('Server')
+S.design.buildServer(serverPage,button)
+end
+
 local settingsPage = page('Settings')
 section(settingsPage, 'BLACK EDITION / COULEUR')
 local PALETTE = { 'FF475C', 'C5F277', '5EC8FF', 'B07CFF', 'FF6FA8', 'FF9F43', 'FFD84D', '4DE0A0', 'F1F4EF' }
@@ -1822,12 +1854,18 @@ local function applyAccent(hex)
     S.design.applyAccent()
     updateTabs()
 end
+S.applyAccent = function(hex)
+    if type(hex)~='string' or not hex:match('^%x%x%x%x%x%x$') then return false end
+    applyAccent(hex);return true
+end
 do
+local picker = S.design.colorPicker(settingsPage,applyAccent,function(hex) ui.accent=hex;applyAccent(hex);saveSettings() end)
+grid(settingsPage,{{'Appliquer la couleur',picker.commit},{'Annuler la couleur',picker.cancel}})
 local customAccent = textbox(settingsPage, 'Accent #RRGGBB')
 button(settingsPage, 'Appliquer mon accent', function()
     local h = customAccent.Text:gsub('^#', ''):upper()
     if not h:match('^%x%x%x%x%x%x$') then logLine('Accent invalide : #RRGGBB requis'); return end
-    ui.accent = h; applyAccent(h); saveSettings()
+    ui.accent = h; applyAccent(h); if S.design.picker then S.design.picker.sync(h) end; saveSettings()
 end)
 toggle(settingsPage, function() return 'Animations : ' .. (ui.animations and 'oui' or 'non') end,
     function() ui.animations = not ui.animations; if not ui.animations then S.design.finishAnimations() end; saveSettings() end)
@@ -1838,14 +1876,21 @@ for i, hex in ipairs(PALETTE) do
     local sw = make('TextButton', { Name = 'Couleur' .. h, Text = '', BackgroundColor3 = hexColor(h), BorderSizePixel = 0,
         Size = UDim2.new(1 / #PALETTE, -6, 1, 0), Position = UDim2.new((i - 1) / #PALETTE, 3, 0, 0) }, swatches)
     round(sw, 8)
-    connect(sw.Activated, function() ui.accent = h; applyAccent(h); saveSettings() end)
+    connect(sw.Activated, function() ui.accent = h; applyAccent(h); if S.design.picker then S.design.picker.sync(h) end; saveSettings() end)
 end
-toggle(settingsPage, function() return 'Taille du menu : ' .. math.floor(ui.scale * 100 + 0.5) .. ' %' end,
-    function()
-        local nextScale = { [75] = 1, [100] = 1.25, [125] = 1.5, [150] = 0.75 }
-        ui.scale = nextScale[math.floor(ui.scale * 100 + 0.5)] or 1
-        menuScale.Scale = ui.scale; fitWindow(); saveSettings()
-    end)
+section(settingsPage,'Affichage & confort')
+S.design.scaleSlider=S.design.slider(settingsPage,'MenuScaleSlider','Échelle du menu',0.75,1.5,ui.scale,function(value)
+    ui.scale=value;menuScale.Scale=value;fitWindow();saveSettings()
+end)
+toggle(settingsPage,function() return 'Densité : '..ui.density end,function()
+    ui.density=ui.density=='normal' and 'compact' or 'normal';S.design.layout();saveSettings()
+end)
+toggle(settingsPage,function() return 'Mesures dans l’en-tête : '..(ui.metrics and 'oui' or 'non') end,function()
+    ui.metrics=not ui.metrics;metrics.Visible=ui.metrics;S.design.layout();saveSettings()
+end)
+toggle(settingsPage,function() return 'Masquer pendant la pêche : '..(ui.hideInMinigame and 'oui' or 'non') end,function()
+    ui.hideInMinigame=not ui.hideInMinigame;saveSettings()
+end)
 local overlay = label(gui, 'FPS --', 26)
 overlay.Name = 'PerformanceOverlay'
 overlay.Size = UDim2.fromOffset(200, 26)
@@ -1869,12 +1914,14 @@ local hotkeyButton = button(settingsPage, keyText(), function(b) capturing = tru
 
 section(settingsPage, 'PROFILS (tes reglages enregistres)')
 local profileBox = textbox(settingsPage, 'Nom du profil')
-local profileList = label(settingsPage, '', 22)
+local profileList = S.design.rowList(settingsPage,'profiles',10,'Aucun profil enregistré')
+profileList.onSelect=function(row) profileBox.Text=row.title end
 local function refreshProfiles()
     local names = {}
     for n in pairs(profiles) do names[#names + 1] = n end
     table.sort(names)
-    profileList.Text = #names == 0 and 'Aucun profil.' or ('Profils : ' .. table.concat(names, ', '))
+    local rows={};for _,name in ipairs(names) do rows[#rows+1]={title=name,sub='Profil enregistré',badge='CHOISIR'} end
+    profileList:set(rows)
 end
 local function profileName()
     local n = profileBox.Text:match('^%s*(.-)%s*$')
@@ -1887,6 +1934,8 @@ local function applyPrefs()
     overlay.Visible = ui.overlay
     metrics.Visible = ui.metrics
     S.setSpeedPreset(ui.speedPreset)
+    if S.design.picker then S.design.picker.sync(ui.accent) end
+    if S.design.scaleSlider then S.design.scaleSlider.sync(ui.scale) end
     if ui.size then window.Size = UDim2.fromOffset(ui.size.x, ui.size.y) end
     if ui.position then window.Position = UDim2.fromOffset(ui.position.x, ui.position.y) end
     if ui.overlayPosition then overlay.Position = UDim2.fromOffset(ui.overlayPosition.x, ui.overlayPosition.y) end
@@ -1991,33 +2040,6 @@ local function names(list)
     return #out == 0 and 'aucun' or table.concat(out, ', ')
 end
 function S.refreshDashboard()
-    local h, m = S.hub, S.hub.money
-    local snap = h:snapshot(os.clock())
-    local rate = snap.hourly and string.format('%.0f / h', snap.hourly) or 'N/D (< 60 s)'
-    local text = string.format('Activite : %s | Etat : %s\nSession : %.0f s | Gains observes en ventes : %.0f | Estimation : %s\nLancers : %d | Mini-jeu : %d clics | Erreurs : %d',
-        snap.activity, S.state, snap.elapsed, snap.earned, rate, S.castAttempts, S.clicks, #h.errors)
-    if S.views.dashboard then S.views.dashboard.Text = text end
-    if S.views.money then S.views.money.Text = string.format('Solde observe : %s\nVentes avec montant : %d | Gains : %.0f\nDepots observes : %d | Total depose : %.0f\nAppats lus : %s | Baisses : %d | Ajouts : %d\nTaux horaire : %s',
-        m.cash == nil and 'N/D' or tostring(m.cash), m.sales, m.earned, m.deposits, m.deposited,
-        m.bait == nil and 'N/D' or tostring(m.bait), m.baitUsed, m.baitAdded, rate) end
-    if S.views.spots then S.views.spots.Text = 'Spots : ' .. names(h.library.spots) .. '\nActif : ' .. tostring(h.activeSpot or 'aucun') end
-    if S.views.routes then S.views.routes.Text = 'Destinations : ' .. names(h.library.routes) .. '\nTrajet tampon : ' .. #S.recordBuffer .. ' points\n' .. tostring(S.driveStatus) end
-    if S.views.farm then S.views.farm.Text = (h.farm.available and 'Adaptateur local charge (validation jeu requise)' or 'Adaptateur BlockSpin absent')
-        .. string.format('\nPlantations confirmees : %d | Recoltes confirmees : %d\nPassages : %d', h.farm.planted, h.farm.harvested, h.farm.cycles) end
-    local lines = {}
-    for n, stat in pairs(h.spotStats) do
-        lines[#lines + 1] = string.format('%s : %d lancers, %d textes, %d signaux rares, %.0f s', n, stat.casts, stat.texts, stat.rareSignals, stat.seconds)
-    end
-    table.sort(lines)
-    if S.views.spotStats then
-        S.views.spotStats.Text = #lines > 0 and table.concat(lines, '\n') or 'Aucun spot actif mesure. Les textes et signaux rares sont heuristiques, pas des captures confirmees.'
-        S.views.spotStats.Size = UDim2.new(1, 0, 0, math.max(64, #lines * 32))
-    end
-    lines = {}
-    for i = math.max(1, #h.errors - 7), #h.errors do
-        local e = h.errors[i]; lines[#lines + 1] = e.stage .. ' : ' .. e.message
-    end
-    if S.views.errors then S.views.errors.Text = #lines > 0 and table.concat(lines, '\n') or 'Aucune erreur enregistree cette session' end
     S.design.refresh()
 end
 local emergency = button(gui, 'STOP / F12', S.cancel, 38)
@@ -2163,11 +2185,12 @@ local frames, elapsed = 0, 0
 connect(RunService.RenderStepped, function(dt)
     frames = frames + 1; elapsed = elapsed + dt
     if elapsed < 1 then return end
-    if ui.metrics or ui.overlay then
+    do
         local ok, ping = pcall(function() return player:GetNetworkPing() end)
         local pingText = (ok and isNum(ping) and ping >= 0) and string.format('%.0f ms', ping * 1000) or 'N/D'
         local txt = string.format('FPS %.0f | Ping %s', frames / elapsed, pingText)
         metrics.Text = txt; overlay.Text = txt
+        S.design.recordMetrics(frames / elapsed,ok and isNum(ping) and ping>=0 and ping or nil)
     end
     if carInfo.Parent then
         local seat = currentSeat()
@@ -2252,14 +2275,7 @@ local function resetPanel(panel)
 end
 
 local nextCheck, fullSince = 0, nil
-local function refreshInfo()
-    if not (infoLabel and infoLabel.Parent) then return end
-    local txt = string.format('Inventaire : %s      Appats : %s\nVoiture : %s\nLancers : %d      Clics mini-jeu : %d%s',
-        S.inventoryText, S.baitUnknown and '?' or ('x' .. tostring(S.baitCount)),
-        S.car and S.car.name or 'monte au volant une fois pour la memoriser',
-        S.castAttempts, S.clicks, S.keyErrors > 0 and ('      Erreurs touches : ' .. S.keyErrors) or '')
-    if infoLabel.Text ~= txt then infoLabel.Text = txt end
-end
+local function refreshInfo() end -- donnees presentes dans les widgets de presentation
 
 table.insert(conns, RunService.Heartbeat:Connect(function()
     if not S.running then return end

@@ -1,3 +1,19 @@
+# Capacités V1.1.0 — 2026-11-06
+
+**310 vérifications réussies en simulation ; aucun essai réel de rendu Roblox/Xeno de cette version.**
+
+| Ajout | Preuve exécutée | Limite |
+|---|---|---|
+| Palette HSV | Conversion, souris/tactile, bornes, annulation, sauvegarde et aperçu sans tween par pixel | Rendu et saisie réels à valider |
+| Affichage visuel | Compteurs/jauges/listes, graphiques, profil en haut et réglages testés dans la maquette | Maquette HTML inspectée, pas de capture Roblox réelle |
+| Présence serveur | Initialisation, événements, dédoublonnage, pagination, historique borné et nettoyage | Historique uniquement depuis l’ouverture ; aucune donnée antérieure inventée |
+| Localisation serveur | Valeur inconnue explicitement affichée | API publique client ne fournit pas la région physique ; aucune déduction par l’IP du joueur |
+| Régression | Tests de pêche, conduite, argent et arrêt précédents passent | Ne prouve pas les mécanismes du jeu réel ; Auto Farm toujours indisponible sans adaptateur |
+
+Détails dans `tests/VALIDATION_V11.md`.
+
+---
+
 # Capacités V1.0.0 — 2026-11-06
 
 **Aucune fonction V1.0.0 confirmée en jeu.** Les confirmations historiques ci-dessous ne valident pas cette version. La base de travail est `main` 0.9.1 (`c0da490`).

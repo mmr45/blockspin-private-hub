@@ -54,3 +54,13 @@ Aucun cas de cette version n'a été exécuté en jeu. Consigner chaque résulta
 24. Changer rapidement d’onglet, réduire puis rouvrir immédiatement, alterner RightShift : aucune page grisée ni fermeture tardive. Couper Animations et vérifier les états instantanés.
 25. Tester 960 × 640, mode compact, échelle 150 %, redimensionnement de la fenêtre Roblox et changement de caméra : sections empilées, accès par défilement, avatar et STOP accessibles.
 26. Fermer et relancer pendant le chargement de la photo : aucune ancienne interface ni animation restante. Vérifier le masquage automatique du mini-jeu sans bouton de réouverture superposé.
+
+## V1.1.0 : palette et serveur (non exécutés en jeu)
+
+27. Vérifier la photo en haut et la lisibilité des compteurs/jauges/listes. Ouvrir volontairement le journal technique : replié par défaut.
+28. Dans Settings, glisser sur le plan de couleur et la teinte, sortir des bords, utiliser un écran tactile. Appliquer, annuler, changer de catégorie ou perdre le focus : aucune sauvegarde par pixel, état cohérent après relance.
+29. Régler l’échelle au glisser puis la densité. Enregistrer/charger un profil et vérifier couleur, échelle, densité, métriques et masquage du mini-jeu.
+30. Cliquer un spot/trajet/profil dans les listes : champ prérempli, aucun déplacement ni lancement de cycle.
+31. Ouvrir Server : comparer population/capacité à Roblox. Faire rejoindre/quitter un compte de test : dernière arrivée/départ visible, aucune fausse arrivée pour les joueurs déjà présents au lancement.
+32. Tester pagination avec plus de huit joueurs, départ d’un joueur affiché sur la dernière page, fermeture/relance : pas d’observateur dupliqué. La région doit rester « Non fournie », et l’historique commencer à l’ouverture.
+33. Regarder les graphiques FPS/ping avec mesures manquantes : N/D, aucune mesure inventée. Tester 480 px de largeur et les transitions rapides pendant la palette.

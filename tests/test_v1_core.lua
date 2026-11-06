@@ -70,3 +70,22 @@ check('argent : decimales conservees', Hub.parseMoney('12.50') == 12.5 and Hub.p
 check('argent : milliers acceptes', Hub.parseMoney('1,200') == 1200 and Hub.parseMoney('1.200') == 1200 and Hub.parseMoney('1 200') == 1200)
 check('argent : formats mixtes valides', Hub.parseMoney('1,200.50') == 1200.5 and Hub.parseMoney('1.200,50') == 1200.5)
 check('argent : formats ambigus refuses', Hub.parseMoney('1,2,3') == nil and Hub.parseMoney('-500') == nil and Hub.parseMoney('abc') == nil)
+check('HSV : couleurs primaires', Hub.hsvToHex(0,1,1)=='FF0000' and Hub.hsvToHex(1/3,1,1)=='00FF00' and Hub.hsvToHex(2/3,1,1)=='0000FF')
+check('HSV : blanc et noir', Hub.hsvToHex(0.7,0,1)=='FFFFFF' and Hub.hsvToHex(0.2,1,0)=='000000')
+check('HSV : valeurs bornees et nombres invalides refuses', Hub.hsvToHex(1,2,1)=='FF0000' and Hub.hsvToHex(0/0,1,1)==nil)
+local roundTrip=true
+for _,hex in ipairs({'FF475C','12ABEF','000000','FFFFFF','808080','00FFFF','B07CFF'}) do
+    local h,s,v=Hub.hexToHSV(hex);if Hub.hsvToHex(h,s,v)~=hex then roundTrip=false end
+end
+check('HSV : conversion aller-retour exacte des accents', roundTrip)
+check('HSV : hexadecimal invalide refuse', Hub.hexToHSV('GGGGGG')==nil and Hub.hexToHSV('123')==nil)
+local monitor=Hub.newServer(0,30)
+monitor:add(1,'A','Alice',0,true);monitor:add(2,'B','Bob',1,false)
+check('serveur pur : baseline distincte d\'une arrivee', monitor.count==2 and monitor.joined==1 and #monitor.events==1)
+check('serveur pur : id invalide refuse', not monitor:add(0/0,'x','x',1,false) and not monitor:add(1.5,'x','x',1,false))
+monitor:remove(2,2)
+check('serveur pur : depart identifie', monitor.left==1 and monitor:recent('leave',1)[1].player.display=='Bob')
+for i=3,120 do monitor:add(i,'P'..i,'P'..i,i,false);monitor:remove(i,i+1) end
+check('serveur pur : historique borne a 80', #monitor.events==80 and monitor.count==1)
+local view=monitor:roster();view[1].name='Modifie'
+check('serveur pur : snapshots independants', monitor.players[1].name=='A')

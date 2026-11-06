@@ -171,5 +171,56 @@ function Core:farmAction(plot, crop, replant)
     if observed.state == 'empty' then return { kind = 'plant', plot = plot, crop = crop } end
     return nil, 'etat ou culture inattendu : aucune action'
 end
+-- Couleur et observateur serveur purs ; aucune geolocalisation deduite.
+function Core.hsvToHex(h,s,v)
+    if not finite(h) or not finite(s) or not finite(v) then return nil end
+    h=h%1;s=math.max(0,math.min(1,s));v=math.max(0,math.min(1,v))
+    local c=v*s;local x=c*(1-math.abs((h*6)%2-1));local m=v-c
+    local rgb={{c,x,0},{x,c,0},{0,c,x},{0,x,c},{x,0,c},{c,0,x}}
+    local a=rgb[math.floor(h*6)+1]
+    return string.format('%02X%02X%02X',math.floor((a[1]+m)*255+0.5),math.floor((a[2]+m)*255+0.5),math.floor((a[3]+m)*255+0.5))
+end
+function Core.hexToHSV(hex)
+    if type(hex)~='string' or not hex:match('^%x%x%x%x%x%x$') then return nil end
+    local r,g,b=tonumber(hex:sub(1,2),16)/255,tonumber(hex:sub(3,4),16)/255,tonumber(hex:sub(5,6),16)/255
+    local hi,lo=math.max(r,g,b),math.min(r,g,b);local d=hi-lo;local h=0
+    if d>0 then
+        if hi==r then h=((g-b)/d)%6 elseif hi==g then h=(b-r)/d+2 else h=(r-g)/d+4 end
+        h=h/6
+    end
+    return h,hi==0 and 0 or d/hi,hi
+end
+function Core.newServer(now,maxPlayers)
+    local server={started=now,players={},events={},joined=0,left=0,count=0,revision=0,maxPlayers=maxPlayers,region=nil}
+    function server:add(id,name,display,now,baseline)
+        if not finite(id) or id<1 or id%1~=0 or self.players[id] then return false end
+        self.players[id]={id=id,name=tostring(name or '?'):sub(1,64),display=tostring(display or name or '?'):sub(1,64),observed=now,baseline=not not baseline}
+        self.count=self.count+1;self.revision=self.revision+1
+        if not baseline then
+            self.joined=self.joined+1
+            bounded(self.events,{kind='join',player=copy(self.players[id]),at=now},80)
+        end
+        return true
+    end
+    function server:remove(id,now)
+        local p=self.players[id];if not p then return false end
+        bounded(self.events,{kind='leave',player=copy(p),at=now},80)
+        self.players[id]=nil;self.count=self.count-1;self.left=self.left+1;self.revision=self.revision+1
+        return true
+    end
+    function server:roster()
+        local rows={};for _,p in pairs(self.players) do rows[#rows+1]=copy(p) end
+        table.sort(rows,function(a,b) return a.name:lower()==b.name:lower() and a.id<b.id or a.name:lower()<b.name:lower() end)
+        return rows
+    end
+    function server:recent(kind,limit)
+        local rows={}
+        for i=#self.events,1,-1 do
+            if self.events[i].kind==kind then rows[#rows+1]=copy(self.events[i]);if #rows>=(limit or 6) then break end end
+        end
+        return rows
+    end
+    return server
+end
 Core.copy = copy
 return Core

@@ -22,11 +22,11 @@ check('UI profil : miniature prete affichee', avatar.Visible and avatar.Image:fi
 check('UI profil : placeholder masque apres succes', not profile:FindFirstChild('AvatarPlaceholder',true).Visible)
 check('UI profil : noms longs tronques sans champ editable', profile:FindFirstChild('DisplayName').TextTruncate==Enum.TextTruncate.AtEnd)
 check('UI : barre laterale et contenu separes', S.design.sidebar.Parent==S.window and S.design.content.Parent==S.window)
-check('UI : icones des six onglets', #S.design.navItems==6 and S.design.navItems[1].icon~=nil)
+check('UI : icones des sept onglets', #S.design.navItems==7 and S.design.navItems[1].icon~=nil)
 check('UI : accent rouge par defaut', S.ui.accent=='FF475C')
 local cards=S.design.pages[M.ourGui():FindFirstChild('Fishing',true)].cards
 local visible={};for _,card in ipairs(cards) do if card.Visible then visible[#visible+1]=card end end
-check('UI : cartes en deux colonnes', #visible==2 and visible[1].Position.X.Scale==0 and visible[2].Position.X.Scale==0.5)
+check('UI : cartes en deux colonnes', #visible>=2 and visible[1].Position.X.Scale==0 and visible[2].Position.X.Scale==0.5)
 check('UI : journal correctement deplace dans Statistics', M.ourGui():FindFirstChild('Fishing',true):FindFirstChild('CardTitle',true).Text=='Automatisation')
 local row=S.design.rows[1]
 check('UI : interrupteur visuel actif', row.track.Visible and row.knob.Position.X.Offset==19)
