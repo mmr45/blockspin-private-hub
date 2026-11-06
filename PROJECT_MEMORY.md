@@ -1,3 +1,18 @@
+# V1.2.0 — observatoire, plantes et configuration — 2026-11-06
+
+- Base : main `da0c0efd647cc1af379169a136fc5733fffc9c21`, PR #6 fusionnée par l'utilisateur. Branche dédiée `feat/v1.2-workspace-tools`, nouvelle PR sans fusion automatique.
+- Demande explicite : réaliser les améliorations proposées pour plantes/serveurs/UI/script et consigner les configurations actuelles ainsi que le travail interne futur pour le faire ensuite. Inventaire détaillé dans `CONFIGURATION.md`.
+- Sources supplémentaires : `src/observatory.lua` (services locaux) et `src/workspace_ui.lua` (vues/contrôles), injectées par `build.py`. Un seul `src/main.lua` actif, généré.
+- Plantes : scanner à la demande de paires temps/% réellement présentes dans PlayerGui ou BillboardGui/SurfaceGui répliqués ; ambiguïtés refusées. Liaison explicite d'une parcelle à soi, cartes avec timer, jauge, distance si connue, regroupement et alertes. Lectures figées/streaming/restauration signalés estimés ; zéro calculé ne prouve pas maturité. Changement d'Adornee suspend la liaison. Aucune disparition assimilée à une récolte.
+- `S.setPlantObserver(fn)` : contrat en lecture seule, borné/expirable, pour une future vraie intégration. **Identifiant stable, propriété, type réel, création/état vide/récolte BlockSpin toujours à caractériser.** Pas de détection universelle de nouvelle plantation ni d'actions Auto Farm en jeu. L'adaptateur d'actions agricoles existant reste distinct et absent.
+- Serveurs : roster avec avatars, recherche/tri, amitié par appel officiel, suivi et alertes, fil daté UTC et présence observée, statistiques/graphique de ping, favoris, bilans et export local. Pas d'âge réel ni de région inventés.
+- Liste publique : transport HTTP Roblox officiel ou lecteur explicite fourni, validation stricte, pagination, filtres/cooldown/délai et résultat tardif ignoré. **Accès HTTP client non confirmé et souvent indisponible** ; état visible, aucun proxy/secret ajouté. Changement par sélection puis confirmation limitée à 15 s, via TeleportService officiel ; cela ne confirme pas l'arrivée.
+- UI : thèmes d'accent nommés, couleurs récentes, ordre/largeur/visibilité des cartes, import/export JSON borné, reset d'apparence préservant bibliothèque/observations, mini-dashboard déplaçable et STOP, confidentialité ciblée aux vues du hub et exports de session.
+- File : pauses, trajets nommés, cycle et attente de plantes réellement prêtes ; délai, preuve, arrêt après erreur et STOP sans relance automatique. Test du cycle complet suivi d'une pause dans la maquette.
+- Persistance : `blockspin-observatory-v1.json` uniquement sur bouton explicite ; 30 favoris, 30 bilans, 50 plantes ; fichier corrompu préservé. Plantes restaurées uniquement sur même place/JobId, toujours estimées. Liaisons GUI et joueurs suivis propres à la session. Aucun envoi automatique à un tiers.
+- 482 vérifications locales réussies, dont 109 supplémentaires ; build/statique conformes. Inspection d'une maquette HTML issue de l'arbre Lua simulé, pas d'un rendu Roblox. **V1.2 non validée dans Roblox/Xeno.** Voir `tests/VALIDATION_V12.md` et essais manuels.
+- Corrections Money/pêche 1.1.1 conservées. Rareté : notification « signal à vérifier » séparée du délai des actions, sans convertir un texte violet en capture prouvée.
+
 # Correctif V1.1.1 — 2026-11-06
 
 - Base : main `109e18cfd2c968610b5c6ab01cc4c7a1671b8514`, PR #5 fusionnée. Branche `fix/v1.1.1-money-fishing-input`, livraison par PR sans fusion automatique.

@@ -1,3 +1,20 @@
+# Capacités V1.2.0 — 2026-11-06
+
+**482 vérifications locales, 0 échec ; aucune validation Roblox/Xeno V1.2.** Les captures réelles V1.1.0 confirment seulement l'affichage de cette ancienne UI.
+
+| Ajout | Preuve locale | Limite réelle |
+|---|---|---|
+| Plantes liées | Découverte, ambiguïtés, propriété explicite, échéance, recalage, streaming, source recréée, GUI recyclé, alertes, restauration isolée par serveur | Liaison manuelle ou lecteur réel à fournir ; pas d'identité/propriété/création BlockSpin supposée |
+| Cartes et mini-dashboard | Arbre Lua, sélection, compteurs, visibilité, organisation, import et reset testés ; maquette visuelle inspectée | Rendu, saisie et performances Roblox à valider |
+| Serveur courant | Présence unique conservée, recherche, avatars, amis, filtres d'événements, UTC, stats ping, confidentialité et export | Historique depuis ouverture ; API amis/miniatures à confirmer en jeu |
+| Publics/favoris/bilans | Validation des instantanés, filtres/pagination, erreurs/timeouts, confirmation de changement, sauvegarde atomiquement validée | HTTP client peut être indisponible ; une requête officielle de changement ne prouve pas une arrivée |
+| File d'activités | Pause, maturité réelle/estimée, erreur, STOP, cycle complet puis étape suivante simulés | Repose sur vendeur/ATM/physique réels encore à valider ; aucun Auto Farm BlockSpin fourni |
+| Régression | 373 vérifications antérieures conservées, 109 nouvelles ; build et statique | Simulation uniquement ; pas de promesse de pêche en arrière-plan |
+
+Configuration et branchements à faire : [CONFIGURATION.md](CONFIGURATION.md). Rapport : [tests/VALIDATION_V12.md](tests/VALIDATION_V12.md).
+
+---
+
 # Correctifs V1.1.1 — 2026-11-06
 
 Retour utilisateur confirmé par captures en V1.1.0 : l’UI s’affiche, mais le compteur Money n’est pas lu et les entrées pêche dépendent du curseur/focus. Les corrections ci-dessous sont **simulées seulement**, pas validées dans Roblox/Xeno.

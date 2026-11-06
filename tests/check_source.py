@@ -14,7 +14,10 @@ assert "--@@VISUALS@@" not in source
 assert (root / "src/hub_core.lua").read_text(encoding="utf-8") in source
 assert "local DEFAULT_DATA = {" in source
 assert source.replace("\r\n", "\n").count("\n") > cycle.count("\n"), "main.lua doit contenir les donnees injectees"
-assert "local VERSION = '1.1.1'" in source
+assert "local VERSION = '1.2.0'" in source
+for name in ("observatory", "workspace_ui"):
+    assert (root / "src" / (name + ".lua")).read_text(encoding="utf-8") in source
+    assert "--@@" + name.upper() + "@@" not in source
 for name in ("Fishing", "Vehicle", "Money", "Farming", "Statistics", "Settings", "Server"):
     assert f"page('{name}')" in source, name
 assert "player:Kick(" in source  # seule sortie volontaire : option poisson rare

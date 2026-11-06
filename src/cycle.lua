@@ -1,10 +1,10 @@
--- BlockSpin Hub v1.1.1
+-- BlockSpin Hub v1.2.0
 -- Peche auto (logique v0.6.8 conservee) + cycle vente/ATM par conduite NATIVE sur route
 -- (touches simulees W/A/S/D, aucun deplacement de CFrame, aucune teleportation).
 -- Aucun passage sous la carte : non implemente volontairement (voir README_v080.md).
 -- Arret complet : getgenv().BlockSpinCycle080.stop()
 -- Arret d'urgence du cycle/conduite (le script reste charge) : F12
-local VERSION = '1.1.1'
+local VERSION = '1.2.0'
 local E = (getgenv and getgenv()) or _G
 
 ---------------------------------------------------------------------------
@@ -1106,6 +1106,9 @@ end
 -- 15. CYCLE : chaque etape = precondition, action, preuve, delai, erreur, annulation
 ---------------------------------------------------------------------------
 local function cancelAll(reason)
+    if S.observatory then
+        local o=S.observatory;o.queueTicket=(o.queueTicket or 0)+1;o.queueRunning=false;o.queueDeadline=nil;o.queueStatus='Arretee : '..tostring(reason or 'annule')
+    end
     S.token = S.token + 1
     S.castTicket=nil;S.castPending=false
     releaseAll(); releaseMouse()
@@ -1145,6 +1148,7 @@ function S.performStep(name, timeout, tok, action, verify)
 end
 
 local function runCycle(manual)
+    if S.observatory and S.observatory.queueRunning and not S.observatory.dispatching then return false,'file centrale en cours' end
     if S.cycleRunning or S.recording then return false, 'cycle ou enregistrement deja en cours' end
     S.token = S.token + 1
     local tok = S.token
@@ -1154,6 +1158,7 @@ local function runCycle(manual)
             if not alive(tok) then return end
             releaseAll(); releaseMouse()
             S.cycleRunning = false
+            S.lastCycleResult={token=tok,ok=false,detail=tostring(msg)}
             S.cycleFailures = S.cycleFailures + 1
             S.lastRouteError = stage .. ' : ' .. tostring(msg)
             setState('ERROR', S.lastRouteError)
@@ -1228,6 +1233,7 @@ local function runCycle(manual)
             if not equipRod(rodName) then logLine('Canne non re-equipee automatiquement : equipe-la') end
             S.checkInventory(); S.sellAttempts = 0; lastCast = -1e6
             S.cycleRunning = false; S.cycleFailures = 0
+            S.lastCycleResult={token=tok,ok=true}
             setState('FISHING', 'cycle complet termine')
             if S.toast then S.toast('Cycle termine : retour a la peche', 'ok') end
         end)
@@ -1240,6 +1246,7 @@ S.runCycle = function() return runCycle(true) end
 S.retryCycle = function() S.cycleFailures = 0; S.sellAttempts = 0; return runCycle(false) end
 
 local function testDrive(which, namedRoute)
+    if S.observatory and S.observatory.queueRunning and not S.observatory.dispatching then return false,'file centrale en cours' end
     if S.recording then return false, 'enregistrement en cours' end
     if S.cycleRunning then return false, 'cycle en cours' end
     if not currentSeat() then setState('ERROR', 'test conduite : monte au volant d\'abord'); return false end
@@ -1308,6 +1315,7 @@ local libraryFile = 'blockspin-library-v1.json'
 local libraryWritable = true
 local function idle()
     return S.running and not S.cycleRunning and not S.hub.current and not S.recording
+        and not (S.observatory and S.observatory.queueRunning and not S.observatory.dispatching)
 end
 function S.saveLibrary()
     if not libraryWritable then return false, 'fichier illisible preserve : corriger puis recharger explicitement' end
@@ -1411,6 +1419,7 @@ function S.setFarmingAdapter(adapter)
     return S.hub:setFarmAdapter(adapter)
 end
 function S.startFarm(plan, replant)
+    if S.observatory and S.observatory.queueRunning then return false,'file centrale en cours' end
     if not idle() then return false, 'activite en cours' end
     if not S.hub.farm.available then return false, 'Culture indisponible : interactions du jeu non observees. Utiliser Diagnostic ecran.' end
     if type(plan) ~= 'table' or #plan < 1 or #plan > 20 then return false, '1 a 20 parcelles requises' end
@@ -1530,9 +1539,13 @@ end
 ---------------------------------------------------------------------------
 local SETTINGS_FILE = 'blockspin-settings-v1.json'
 local ui = { accent = 'FF475C', hotkey = 'RightShift', scale = 1, metrics = true, overlay = false, hideInMinigame = true,
-    speedPreset = 'Rapide', rareAction = 'none', rarePurple = true, toasts = true, animations = true, layoutVersion = 2, density = 'normal' }
+    speedPreset = 'Rapide', rareAction = 'none', rarePurple = true, toasts = true, animations = true, layoutVersion = 2, density = 'normal',
+    privacy=false,miniDashboard=false,plantAlerts=true,plantAlertSeconds=60,plantGrouping=false,presenceAlerts=false,friendAlerts=false,rareNotifications=true,
+    serverMinFree=1,serverMaxPopulation=100,cardLayouts={},recentColors={},savedThemes={} }
 local PREF_KEYS = { 'accent', 'hotkey', 'scale', 'metrics', 'overlay', 'hideInMinigame', 'speedPreset', 'rareAction', 'rarePurple', 'toasts', 'animations',
-    'position', 'size', 'overlayPosition', 'layoutVersion', 'density', 'moneySourcePath' }
+    'position', 'size', 'overlayPosition', 'layoutVersion', 'density', 'moneySourcePath',
+    'privacy','miniDashboard','plantAlerts','plantAlertSeconds','plantGrouping','presenceAlerts','friendAlerts','rareNotifications',
+    'serverMinFree','serverMaxPopulation','cardLayouts','recentColors','savedThemes' }
 local RARE_ACTIONS = { none = 'ne rien faire', leave = 'quitter le serveur', sell = 'aller vendre' }
 local settingsRaw -- fichier lu en entier : profils et champs du hub 0.4.0 conserves
 local function validKeyName(n)
@@ -1541,6 +1554,24 @@ local function validKeyName(n)
     return ok and k ~= nil
 end
 local function readPrefs(d, into)
+    if type(d)~='table' then return end
+    for _,k in ipairs({'privacy','miniDashboard','plantAlerts','plantGrouping','presenceAlerts','friendAlerts','rareNotifications'}) do if type(d[k])=='boolean' then into[k]=d[k] end end
+    for k,range in pairs({plantAlertSeconds={10,600},serverMinFree={0,100},serverMaxPopulation={1,200}}) do if isNum(d[k]) and d[k]>=range[1] and d[k]<=range[2] then into[k]=math.floor(d[k]) end end
+    if type(d.cardLayouts)=='table' then
+        local rows={};local count=0
+        for key,v in pairs(d.cardLayouts) do
+            if count<150 and type(key)=='string' and #key<=80 and type(v)=='table' and isNum(v.rank) and v.rank>=1 and v.rank<=150 and type(v.hidden)=='boolean' and type(v.wide)=='boolean' then
+                rows[key]={rank=math.floor(v.rank),hidden=v.hidden,wide=v.wide};count=count+1
+            end
+        end
+        into.cardLayouts=rows
+    end
+    if type(d.recentColors)=='table' then local rows={};for _,v in ipairs(d.recentColors) do if #rows<8 and type(v)=='string' and v:match('^%x%x%x%x%x%x$') then rows[#rows+1]=v:upper() end end;into.recentColors=rows end
+    if type(d.savedThemes)=='table' then
+        local rows={};local count=0
+        for k,v in pairs(d.savedThemes) do if count<12 and Hub.validName(k) and type(v)=='string' and v:match('^%x%x%x%x%x%x$') then rows[k]=v:upper();count=count+1 end end
+        into.savedThemes=rows
+    end
     if type(d.moneySourcePath)=='string' and #d.moneySourcePath<=512 and not d.moneySourcePath:find('%c') then into.moneySourcePath=d.moneySourcePath end
     if d.density=='normal' or d.density=='compact' then into.density=d.density end
     if type(d.accent) == 'string' and d.accent:match('^%x%x%x%x%x%x$') then into.accent = d.accent end
@@ -1575,6 +1606,9 @@ S.ui = ui
 S.moneySourcePath=ui.moneySourcePath
 local profiles = (type(settingsRaw) == 'table' and type(settingsRaw.profiles) == 'table') and settingsRaw.profiles or {}
 local function saveSettings()
+    if ui.recentColors and ui.recentColors[1]~=ui.accent then
+        local rows={ui.accent};for _,h in ipairs(ui.recentColors) do if h~=ui.accent and #rows<8 then rows[#rows+1]=h end end;ui.recentColors=rows
+    end
     if type(writefile) ~= 'function' or not settingsWritable then return false end
     local out = {}
     if type(settingsRaw) == 'table' then for k, v in pairs(settingsRaw) do out[k] = v end end
@@ -2061,6 +2095,8 @@ toggle(settingsPage, function() return 'Annonces en haut de l\'ecran : ' .. (ui.
     function() ui.toasts = not ui.toasts; saveSettings(); if ui.toasts then S.toast('Annonces activees', 'info') end end)
 toggle(settingsPage, function() return 'Detecter aussi les textes violets : ' .. (ui.rarePurple and 'oui' or 'non') end,
     function() ui.rarePurple = not ui.rarePurple; saveSettings() end)
+toggle(settingsPage,function() return 'Notifier les signaux rares : '..(ui.rareNotifications and 'oui' or 'non') end,
+    function() ui.rareNotifications=not ui.rareNotifications;saveSettings() end)
 local capturing = false
 local function keyText() return 'Touche pour masquer le menu : ' .. ui.hotkey end
 local hotkeyButton = button(settingsPage, keyText(), function(b) capturing = true; b.Text = 'Appuie sur une touche... (Echap : annuler)' end)
@@ -2104,7 +2140,7 @@ grid(settingsPage, {
         for _ in pairs(profiles) do count = count + 1 end
         if not profiles[n] and count >= 10 then logLine('Maximum 10 profils'); return end
         local p = {}
-        for _, k in ipairs(PREF_KEYS) do p[k] = ui[k] end
+        for _, k in ipairs(PREF_KEYS) do p[k] = Hub.copy(ui[k]) end
         profiles[n] = p
         refreshProfiles(); saveSettings(); logLine('Profil enregistre : ' .. n)
     end },
@@ -2203,6 +2239,9 @@ emergency.BackgroundColor3 = theme.danger
 S.refreshDashboard()
 end
 
+--@@OBSERVATORY@@
+--@@WORKSPACE_UI@@
+
 S.window = window
 fitWindow()
 updateTabs()
@@ -2266,7 +2305,7 @@ end)
 ---------------------------------------------------------------------------
 do -- poisson rare (portee fermee : limite de 200 locales)
 local RARE_WORDS = { 'legendary', 'legendaire', 'mythic', 'mythique', 'omega', 'epic', 'epique' }
-local catchBaseline, catchWindowUntil, rareCooldownUntil = nil, 0, 0
+local catchBaseline, catchWindowUntil, rareCooldownUntil, rareNoticeUntil = nil, 0, 0, 0
 local function isPurple(c)
     local ok, r, g, b = pcall(function() return c.R, c.G, c.B end)
     if not ok or not isNum(r) or not isNum(g) or not isNum(b) then return false end
@@ -2294,9 +2333,10 @@ function S.onMinigameStart()
 end
 function S.onMinigameEnd(now) catchWindowUntil = now + 8 end
 local function rareTrigger(text)
-    rareCooldownUntil = os.clock() + 60
+    rareNoticeUntil=os.clock()+60
+    if ui.rareAction~='none' then rareCooldownUntil = os.clock() + 60 end
     logLine('POISSON RARE detecte : "' .. text:sub(1, 50) .. '" -> ' .. RARE_ACTIONS[ui.rareAction])
-    S.toast('Poisson rare : ' .. text:sub(1, 40), 'rare')
+    S.toast('Signal de rareté (à vérifier) : ' .. text:sub(1, 40), 'rare')
     if ui.rareAction == 'leave' then
         local rareToken = S.token
         task.delay(1, function()
@@ -2323,7 +2363,8 @@ function S.scanCatch(now)
             for _, w in ipairs(RARE_WORDS) do if f:find(w, 1, true) then rare = true end end
             if not rare and ui.rarePurple and isPurple(o.TextColor3) then rare = true end
             if rare then S.spotEvent('rareSignals') end
-            if rare and ui.rareAction ~= 'none' and os.clock() > rareCooldownUntil and S.running then rareTrigger(t) end
+            if rare and S.running and ((ui.rareAction~='none' and os.clock()>rareCooldownUntil)
+                or (ui.rareAction=='none' and ui.rareNotifications and os.clock()>rareNoticeUntil)) then rareTrigger(t) end
         end
     end
     if changed then
@@ -2537,6 +2578,7 @@ table.insert(conns, RunService.Heartbeat:Connect(function()
         end
         if now >= nextCheck then
             nextCheck = now + 0.8
+            if S.observatory then S.observatory.tick() end
             S.checkInventory(); checkBait(); S.pollMoney(false); refreshInfo()
             if not S.paused then S.scanCatch(now) end
             if S.refreshDashboard then S.refreshDashboard() end
@@ -2684,6 +2726,7 @@ function S.useRecording(which)
 end
 function S.pause() S.paused = true end
 function S.resume()
+    if S.observatory and S.observatory.queueRunning then return false end
     local info = readCapacity()
     if info and info.count >= info.limit then S.inventoryFull = true; return false end
     S.paused = false; S.fishingEnabled = true; S.cycleFailures = 0
@@ -2699,6 +2742,7 @@ function S.stop()
     if not S.running then return end
     S.token = S.token + 1
     S.running = false
+    if S.observatory then S.observatory.cleanup() end
     if S.detachMoneySource then S.detachMoneySource() end
     if S.design then S.design.cleanup() end
     S.recording = false

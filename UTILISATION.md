@@ -1,3 +1,17 @@
+# Nouveautés V1.2.0 : configuration guidée
+
+Voir [CONFIGURATION.md](CONFIGURATION.md) pour tous les réglages et le travail interne restant.
+
+- **Farming** : rechercher les affichages temps/pourcentage près de vos plantes, choisir une paire, nommer votre parcelle et son type, puis confirmer la liaison. Le scanner refuse les paires ambiguës. Les cartes continuent ailleurs sur la map ; une lecture figée ou absente devient estimée. Il reste à relier les vrais signaux BlockSpin pour découvrir automatiquement chaque nouvelle plantation et confirmer récolte/replantation.
+- **Server** : recherche/tri et avatars des joueurs, suivi local au clic, alertes optionnelles, fil UTC, statistiques de ping, favoris et bilans. Sauvegarder explicitement l'observatoire. Les listes publiques signalent l'indisponibilité de l'API si le client ne peut pas la lire. Choisir puis confirmer un serveur sous 15 s ; cela envoie une requête normale à Roblox.
+- **Settings** : thèmes couleur et couleurs récentes, confidentialité, mini-dashboard, ordre/largeur/visibilité des cartes, transfert JSON des réglages et reset d'apparence.
+- **Statistics** : préparer une file de trajets/cycles/attentes/pauses et son délai maximal ; erreur ou STOP interrompt la suite. Une échéance de plante calculée ne suffit pas à valider « prête ».
+- Les nouvelles observations ne sont écrites que par **Sauvegarder favoris / session / timers**. Une restauration de plantes est isolée par serveur et toujours estimée. Aucun envoi automatique hors du jeu.
+
+Version testée en simulation seulement : voir [tests/VALIDATION_V12.md](tests/VALIDATION_V12.md). Money, visée, vendeur/ATM, conduite et rendu doivent encore être validés dans Roblox pour cette version.
+
+---
+
 # Correctifs 1.1.1 — Money et entrées de pêche
 
 Les captures utilisateur ont montré les limites de la 1.1.0. Cette correction est testée en simulation ; elle reste à essayer dans Roblox/Xeno.

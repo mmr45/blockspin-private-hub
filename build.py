@@ -1,4 +1,4 @@
-"""Assemble le script unique : cycle.lua + hub_core.lua + interface.lua + visuals.lua + route_data.json.
+"""Assemble le script unique : cycle, hub_core, interface, visuals, observatory, workspace_ui et route_data.json.
 Usage : python -I build.py [--check] (depuis n'importe quel dossier)."""
 import argparse
 import json
@@ -47,6 +47,10 @@ visuals = (ROOT / "src" / "visuals.lua").read_text(encoding="utf-8")
 assert interface.count("--@@VISUALS@@") == 1, "marqueur widgets absent"
 interface = interface.replace("--@@VISUALS@@", visuals)
 out = src.replace(marker, block).replace(core_marker, "local Hub = (function()\n" + core + "\nend)()").replace(interface_marker, interface)
+for name in ("observatory", "workspace_ui"):
+    extra_marker = "--@@" + name.upper() + "@@"
+    assert out.count(extra_marker) == 1, "marqueur " + name + " absent"
+    out = out.replace(extra_marker, (ROOT / "src" / (name + ".lua")).read_text(encoding="utf-8"))
 target = ROOT / "src" / "main.lua"
 if args.check:
     if not target.exists() or target.read_text(encoding="utf-8") != out:

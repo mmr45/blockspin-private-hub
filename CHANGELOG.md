@@ -1,3 +1,14 @@
+# V1.2.0 — 2026-11-06
+
+- Observatoire agricole : recherche de sources réelles, liaison explicite, cartes temps/%/distance, estimations signalées, alertes, recalage et restauration isolée par serveur. Lecteur en lecture seule prêt à intégrer ; les vrais signaux BlockSpin et l’adaptateur d’actions agricoles restent à fournir.
+- Serveurs : recherche/tri/avatars/amis/suivi, événements datés, statistiques de ping, favoris, bilans et exports locaux. Liste publique conditionnée à l’accès API, filtres/pagination et changement officiel après sélection puis confirmation.
+- Personnalisation : thèmes d’accent, couleurs récentes, ordre/largeur/visibilité des cartes, mini-dashboard, confidentialité, transfert JSON et reset d’apparence.
+- File d’activités avec délais et preuves : pauses, trajets, cycle vente/ATM/retour, maturités réellement observées. STOP annule la suite ; pas de reprise automatique après erreur.
+- CONFIGURATION.md décrit les réglages actuels et tous les branchements internes à faire ensuite. Build étendu à observatory.lua et workspace_ui.lua ; script complet toujours généré.
+- 482 vérifications locales réussies, 0 échec. V1.2 non validée dans Roblox/Xeno ; voir tests/VALIDATION_V12.md.
+
+---
+
 # Historique
 
 ## 1.1.1 — 2026-11-06 (correctifs à valider dans Roblox)
