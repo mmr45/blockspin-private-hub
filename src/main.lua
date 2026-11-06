@@ -1,10 +1,10 @@
--- BlockSpin Hub v1.2.1
+-- BlockSpin Hub v1.2.2
 -- Peche auto (logique v0.6.8 conservee) + cycle vente/ATM par conduite NATIVE sur route
 -- (touches simulees W/A/S/D, aucun deplacement de CFrame, aucune teleportation).
 -- Aucun passage sous la carte : non implemente volontairement (voir README_v080.md).
 -- Arret complet : getgenv().BlockSpinCycle080.stop()
 -- Arret d'urgence du cycle/conduite (le script reste charge) : F12
-local VERSION = '1.2.1'
+local VERSION = '1.2.2'
 local E = (getgenv and getgenv()) or _G
 
 ---------------------------------------------------------------------------
@@ -1056,6 +1056,7 @@ local function shown(o)
     local p = o
     while p and p ~= pg do
         if p:IsA('GuiObject') and not p.Visible then return false end
+        if p:IsA('CanvasGroup') and isNum(p.GroupTransparency) and p.GroupTransparency>=0.99 then return false end
         if p:IsA('ScreenGui') and not p.Enabled then return false end
         p = p.Parent
     end
@@ -1577,6 +1578,7 @@ end
 -- 15. CYCLE : chaque etape = precondition, action, preuve, delai, erreur, annulation
 ---------------------------------------------------------------------------
 local function cancelAll(reason)
+    if S.releaseRodPress then S.releaseRodPress() end
     if S.observatory then
         local o=S.observatory;o.queueTicket=(o.queueTicket or 0)+1;o.queueRunning=false;o.queueDeadline=nil;o.queueStatus='Arretee : '..tostring(reason or 'annule')
     end
@@ -2079,7 +2081,9 @@ S.ui = ui
 S.castDelay=ui.recastDelay
 function S.setFishingAimAssist(enabled)
     if type(enabled)~='boolean' then return false end
+    if S.releaseRodPress then S.releaseRodPress() end
     ui.aimAssist=enabled;S.aimRetryAt=0;S.castTicket=nil;S.castPending=false
+    S.castRecoveryMessage=nil
     S.fishingInputStatus=enabled and 'Visee enregistree activee' or 'Classique : lancer direct'
     return true
 end
@@ -2802,6 +2806,11 @@ function D.refreshVisuals()
     D.value('sales',m.sales);D.value('deposits',m.deposits);D.value('baitUsed',m.baitUsed);D.value('baitAdded',m.baitAdded)
     D.value('saleEarnings',shortMoney(m.earned));D.value('observedDown',shortMoney(m.observedDecreases))
     D.value('fishingInput',S.fishingInputStatus or (S.baitScreenPoint and 'Écran enregistré' or 'Visée à capturer'))
+    if S.castDiagnostic then
+        local c=S.castDiagnostic
+        D.value('rodState',(c.tool or 'Aucune canne')..(c.enabled==false and ' · indisponible' or '')..' · '..c.accepted..' signaux')
+        D.value('castWait',(c.detail or 'En attente')..(isNum(c.wait) and string.format(' · %.1f s',math.max(0,c.wait)) or ''))
+    end
     local state=S.moneyReading
     local masked=state and (state.status:find('masque',1,true) or state.status:find('non visible',1,true))
     D.value('moneyStatus',state and (state.available and 'Actif' or (masked and 'Masqué' or (#S.moneyCandidates>0 and 'À choisir' or 'Non trouvé'))) or 'Recherche')
@@ -3013,7 +3022,7 @@ end
 local home = page('Fishing')
 section(home,'Automatisation')
 toggle(home, function() return (S.fishingEnabled and '[ON]  ' or '[OFF] ') .. 'Peche automatique' end,
-    function() S.fishingEnabled = not S.fishingEnabled end, 44)
+    function() S.fishingEnabled = not S.fishingEnabled;if not S.fishingEnabled and S.releaseRodPress then S.releaseRodPress() end end, 44)
 toggle(home,function() return 'Visée enregistrée : '..(ui.aimAssist and 'oui' or 'non') end,
     function() S.setFishingAimAssist(not ui.aimAssist);saveSettings() end)
 S.design.caption(home,'Mode classique par défaut : place le curseur vers l’eau. La visée enregistrée est facultative.')
@@ -3037,6 +3046,9 @@ S.design.gauge(home,'inventory','Inventaire')
 S.design.metricsGrid(home,{{id='casts',label='LANCERS'},{id='clicks',label='CLICS MINI-JEU'}})
 S.design.detail(home,'activeSpot','Spot actif','Aucun spot')
 S.design.detail(home,'fishingInput','Visée / clics','En attente')
+S.design.detail(home,'rodState','Canne / activation','En attente')
+S.design.detail(home,'castWait','Relance','En attente')
+button(home,'Exporter le diagnostic de relance',function() if S.exportFishingDiagnostic then S.exportFishingDiagnostic() end end)
 logLabel = notice(home, '', 128)
 logLabel.Visible = false
 logLabel.TextSize = 11; logLabel.Font = Enum.Font.Code
@@ -4428,6 +4440,7 @@ function S.isFishingInputActive()
     return S.inputFocused~=false
 end
 connect(UIS.WindowFocusReleased,function()
+    if S.releaseRodPress then S.releaseRodPress() end
     S.inputFocused=false;S.focusKnown=true;S.inputEpoch=S.inputEpoch+1;releaseMouse()
     S.fishingInputStatus='Peche en pause : Roblox hors focus'
 end)
@@ -4504,6 +4517,38 @@ local function sendClick(tok,target,panel,epoch)
 end
 local lastMinigameEnd,minigameWasVisible=nil,false
 local firstCastAt=os.clock()+3
+S.castDiagnostic={events={},requests=0,accepted=0,unacknowledged=0,errors=0,recoveries=0}
+function S.castPhase(phase,detail,wait)
+    local d=S.castDiagnostic;d.phase=phase;d.detail=detail;d.wait=wait
+    S.fishingInputStatus=detail
+    if d.lastPhase~=phase then
+        d.events[#d.events+1]={phase=phase,at=os.clock(),detail=detail};d.lastPhase=phase
+        while #d.events>40 do table.remove(d.events,1) end
+    end
+end
+local function releaseRod(press)
+    if not press or press.released then return end
+    press.released=true
+    local ok,err=pcall(function() press.tool:Deactivate() end)
+    if not ok then S.castDiagnostic.lastReleaseError=tostring(err):sub(1,160) end
+end
+function S.releaseRodPress()
+    local press=S.rodPress;S.rodPress=nil
+    if not press then return end
+    releaseRod(press)
+    if press.connection then press.connection:Disconnect();press.connection=nil end
+end
+function S.exportFishingDiagnostic()
+    local raw=HttpService:JSONEncode({schema=1,version=VERSION,clock=os.clock(),state=S.state,detail=S.detail,
+        fishing=S.fishingEnabled,paused=S.paused,focus=S.inputFocused,full=S.inventoryFull,baitEmpty=S.baitEmpty,
+        aimAssist=ui.aimAssist,recastDelay=S.castDelay,retryDelay=S.retryDelay,diagnostic=Hub.copy(S.castDiagnostic)})
+    local ok=false
+    if type(setclipboard)=='function' then ok=pcall(setclipboard,raw)
+    elseif type(writefile)=='function' then ok=pcall(writefile,'blockspin-fishing-diagnostic.json',raw) end
+    local message=ok and 'Diagnostic de relance exporte localement' or 'Export du diagnostic indisponible'
+    logLine(message);if S.toast then S.toast(message,ok and 'ok' or 'warn') end
+    return ok
+end
 local function aimAtSavedPoint(tok,epoch)
     if not ui.aimAssist then return true end -- comportement classique, sans dependance a Mouse.Hit ni spot obligatoire
     local aim=S.fishingAim
@@ -4535,26 +4580,61 @@ local function aimAtSavedPoint(tok,epoch)
     return true
 end
 local function tryCast(now)
-    if S.castPending or not S.autoCast or not S.fishingEnabled or S.paused or S.inventoryFull or S.cycleRunning or S.baitEmpty then return end
-    if not S.isFishingInputActive() then S.fishingInputStatus='Peche en pause : Roblox hors focus';return end
-    if now<firstCastAt or now<S.aimRetryAt or now-lastCast<S.retryDelay then return end
-    if lastMinigameEnd and now-lastMinigameEnd<S.castDelay then return end
+    if S.castPending then return end
+    if not S.autoCast or not S.fishingEnabled or S.paused or S.inventoryFull or S.cycleRunning or S.baitEmpty then return end
+    if not S.isFishingInputActive() then S.castPhase('focus','Peche en pause : Roblox hors focus');return end
     local tool=fishingTool()
-    if not tool then update('Equipe la canne pour le lancer auto');return end
+    S.castDiagnostic.tool=tool and tool.Name or nil;S.castDiagnostic.enabled=tool and tool.Enabled~=false or false
+    if not tool then S.castPhase('no-rod','Equipe la canne pour le lancer auto');return end
+    if S.lastCastTool and S.lastCastTool~=tool then lastCast=-1e6;S.lastCastTool=nil end
+    if now<firstCastAt then S.castPhase('startup','Preparation de la canne',firstCastAt-now);return end
+    if now<S.aimRetryAt then S.castPhase('recovery',S.castRecoveryMessage or 'Attente de la visee',S.aimRetryAt-now);return end
+    if lastMinigameEnd and now-lastMinigameEnd<S.castDelay then S.castPhase('recast','Relance apres le mini-jeu',S.castDelay-now+lastMinigameEnd);return end
+    if now-lastCast<S.retryDelay then S.castPhase('response',S.castDiagnostic.lastSignal==false and 'Appel envoye · signal indisponible' or 'Activation recue · attente du mini-jeu',S.retryDelay-now+lastCast);return end
+    if tool.Enabled==false then S.castPhase('disabled','Canne en recuperation · attente de Enabled');return end
     local tok,epoch=S.token,S.inputEpoch;S.castPending=true
     local ticket={};S.castTicket=ticket
     task.spawn(function()
         local worked,err=pcall(function()
             local aimed,why=aimAtSavedPoint(tok,epoch)
-            if not aimed then if alive(tok) and S.inputEpoch==epoch then S.aimRetryAt=os.clock()+2;S.fishingInputStatus=why;update(why) end;return end
+            if not aimed then if alive(tok) and S.inputEpoch==epoch then S.aimRetryAt=os.clock()+2;S.castRecoveryMessage=why;S.castPhase('recovery',why,2);update(why) end;return end
             if S.castTicket~=ticket or not alive(tok) or S.inputEpoch~=epoch or not S.isFishingInputActive() or S.paused or S.inventoryFull or S.cycleRunning or not S.fishingEnabled then return end
-            lastCast=os.clock();S.castAttempts=S.castAttempts+1;S.spotEvent('casts')
+            if tool.Parent~=character() or tool.Enabled==false then S.castPhase('disabled','Canne indisponible avant activation');return end
+            -- Nettoyer une ancienne pression avant le nouvel appui, sans modifier Enabled.
+            pcall(function() tool:Deactivate() end)
+            if S.castTicket~=ticket or not alive(tok) or S.paused or S.inputEpoch~=epoch or not S.isFishingInputActive() then return end
+            if tool.Enabled==false then S.castPhase('disabled','Canne en recuperation apres relachement');return end
+            local d=S.castDiagnostic;local press={tool=tool,ack=false,requested=os.clock()};S.rodPress=press
+            local watching=pcall(function() press.connection=tool.Activated:Connect(function() press.ack=true;press.ackAt=os.clock() end) end)
+            d.requests=d.requests+1;d.lastRequest=press.requested;S.castAttempts=S.castAttempts+1;S.spotEvent('casts')
+            S.castPhase('press','Activation de la canne · attente du signal')
             local activated,why2=pcall(function() tool:Activate() end)
-            S.fishingInputStatus=activated and (ui.aimAssist and 'Canne activee · visee enregistree' or 'Canne activee · classique') or tostring(why2)
-            update(activated and ('lancer '..S.castAttempts..' ('..tool.Name..')') or ('Erreur lancer : '..tostring(why2)))
+            -- Une activation est une pression complete : relacher meme en cas d'annulation.
+            if activated then sleep(0.05,tok) end
+            releaseRod(press)
+            local deadline=press.requested+0.15
+            while activated and watching and not press.ack and os.clock()<deadline and alive(tok) and S.castTicket==ticket and S.rodPress==press and S.isFishingInputActive() and not S.paused do task.wait(0.02) end
+            if S.rodPress==press then S.releaseRodPress() elseif press.connection then press.connection:Disconnect();press.connection=nil end
+            if not alive(tok) or S.castTicket~=ticket or S.inputEpoch~=epoch or S.paused or not S.isFishingInputActive() then return end
+            if activated and (press.ack or not watching) then
+                if not lastMinigameEnd or lastMinigameEnd<press.requested then lastCast=press.requested end
+                S.lastCastTool=tool;d.lastSignal=press.ack;d.recoveries=0
+                if press.ack then d.accepted=d.accepted+1;d.lastAccepted=press.ackAt else d.unverified=(d.unverified or 0)+1 end
+                S.castRecoveryMessage=nil
+                S.castPhase('response',press.ack and 'Activation recue · attente du mini-jeu' or 'Signal Activated indisponible · attente du jeu',S.retryDelay)
+                update('activation '..S.castAttempts..' ('..tool.Name..') · '..(press.ack and 'signal recu' or 'non verifiee'))
+            else
+                if watching and not press.ack then d.unacknowledged=d.unacknowledged+1 end
+                if not activated then d.errors=d.errors+1;d.lastError=tostring(why2):sub(1,160) end
+                d.recoveries=d.recoveries+1
+                local backoff=math.min(4,0.5*2^math.min(3,d.recoveries-1));S.aimRetryAt=os.clock()+backoff
+                S.castRecoveryMessage=activated and 'Activation ignoree · nouvelle tentative bornee' or 'Activation refusee · nouvelle tentative bornee'
+                S.castPhase('recovery',S.castRecoveryMessage,backoff)
+            end
         end)
+        if S.rodPress and S.rodPress.tool==tool and S.castTicket==ticket then S.releaseRodPress() end
         if S.castTicket==ticket then S.castPending=false end
-        if not worked and alive(tok) then S.hub:error('Lancer',err,os.clock());S.fishingInputStatus=tostring(err) end
+        if not worked and alive(tok) then S.hub:error('Lancer',err,os.clock());S.fishingInputStatus=tostring(err);S.aimRetryAt=os.clock()+1 end
     end)
 end
 local currentPanel, lastX, lastT, lastClick, lastTarget, lastTries = nil, nil, nil, -100, nil, nil
@@ -4636,6 +4716,7 @@ table.insert(conns, RunService.Heartbeat:Connect(function()
                 minigameWasVisible=false;lastMinigameEnd=os.clock()
                 -- Une manche observee est terminee : le delai de retry sans reponse ne s'applique plus.
                 lastCast=-1e6;firstCastAt=math.min(firstCastAt,lastMinigameEnd)
+                S.castDiagnostic.lastEnd=lastMinigameEnd
                 S.onMinigameEnd(lastMinigameEnd)
             end
             if currentPanel then resetPanel(nil) end
@@ -4644,6 +4725,8 @@ table.insert(conns, RunService.Heartbeat:Connect(function()
         end
         if not minigameWasVisible then S.onMinigameStart() end
         minigameWasVisible = true
+        S.castPhase('minigame','Mini-jeu detecte · pas de relance')
+        S.castDiagnostic.lastMinigame=now
         if panel ~= currentPanel then resetPanel(panel) end
         local x = needle.AbsolutePosition.X + needle.AbsoluteSize.X * 0.5
         local left = target.AbsolutePosition.X
@@ -4731,7 +4814,7 @@ function S.useRecording(which)
     logLine(key .. ' remplace par ' .. #copy .. ' points enregistres (bouton Sauvegarder les donnees pour ecrire le fichier)')
     return true
 end
-function S.pause() S.paused = true end
+function S.pause() S.paused = true;if S.releaseRodPress then S.releaseRodPress() end end
 function S.resume()
     if S.observatory and S.observatory.queueRunning then return false end
     local info = readCapacity()
@@ -4747,6 +4830,7 @@ S.retrySell = S.retryCycle
 ---------------------------------------------------------------------------
 function S.stop()
     if not S.running then return end
+    if S.releaseRodPress then S.releaseRodPress() end
     S.token = S.token + 1
     S.running = false
     if S.observatory then S.observatory.cleanup() end

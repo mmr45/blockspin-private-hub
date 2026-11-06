@@ -92,6 +92,7 @@ local function new(class, name, parent, props)
     setmetatable(o, Inst)
     for k, v in pairs(props or {}) do o[k] = v end
     if class == 'TextButton' or class == 'ImageButton' then o.MouseButton1Click = Signal(); o.Activated = Signal() end
+    if class=='Tool' then o.Activated=Signal();o.Deactivated=Signal() end
     if class=='ImageLabel' then o.IsLoaded=M.thumbnailLoaded~=false end
     if ISA.GuiObject[class] then o.InputBegan = Signal(); o.MouseEnter = Signal(); o.MouseLeave = Signal() end
     o._propSignals = {}
@@ -179,7 +180,25 @@ function hum:MoveTo(p) M.moveTarget = p end
 function hum:EquipTool(t) t.Parent = char end
 function hum:UnequipTools() for _, c in ipairs(char:GetChildren()) do if c.ClassName == 'Tool' then c.Parent = backpack end end end
 local rod = new('Tool', 'Fishing Rod', char)
-function rod:Activate() M.casts = (M.casts or 0) + 1;M.lastCastMouse={X=M.mouseX,Y=M.mouseY};M.lastCastAt=M.clock end
+M.rod=rod
+function rod:Activate()
+    M.activationCalls=(M.activationCalls or 0)+1
+    if not self.Enabled or (M.requireRodRelease and self._active) then M.ignoredActivations=(M.ignoredActivations or 0)+1;return end
+    if M.ignoreNextActivations and M.ignoreNextActivations>0 then M.ignoreNextActivations=M.ignoreNextActivations-1;M.ignoredActivations=(M.ignoredActivations or 0)+1;return end
+    if M.failRodActivation then error('activation refusee (test)') end
+    self._active=true;M.casts=(M.casts or 0)+1;M.lastCastMouse={X=M.mouseX,Y=M.mouseY};M.lastCastAt=M.clock
+    M.rodLog=M.rodLog or {};M.rodLog[#M.rodLog+1]={kind='press',at=M.clock}
+    local function ack() if not M.suppressRodSignal then self.Activated:Fire() end end
+    if M.rodSignalDelay then task.delay(M.rodSignalDelay,ack) else ack() end
+    if M.onRodActivate then M.onRodActivate(self) end
+end
+function rod:Deactivate()
+    if not self._active then return end
+    self._active=false;M.rodReleases=(M.rodReleases or 0)+1
+    M.rodLog=M.rodLog or {};M.rodLog[#M.rodLog+1]={kind='release',at=M.clock}
+    self.Deactivated:Fire()
+    if M.onRodDeactivate then M.onRodDeactivate(self) end
+end
 
 -- GUI du jeu (imitation)
 local items = new('ScreenGui', 'Items', pg)

@@ -1,3 +1,19 @@
+# Correctif V1.2.2 — activation de la canne
+
+La canne n’est plus annoncée lancée simplement parce que `Tool:Activate()` a été appelé. Le script attend sa disponibilité publique, libère l’ancienne pression et effectue un appui/relâchement complet. Les activations ignorées disposent d’une récupération bornée au lieu de cumuler des attentes de 8 secondes.
+
+**Fishing** affiche maintenant :
+
+- **Canne / activation** : outil trouvé, disponibilité et nombre de signaux locaux reçus.
+- **Relance** : phase et délai restant. « Canne en récupération » signifie que Tool.Enabled est faux ; le script ne force jamais cette valeur.
+- **Exporter le diagnostic de relance** : copie JSON dans le presse-papiers, ou fichier local `blockspin-fishing-diagnostic.json` si le presse-papiers est absent. Pas d’envoi automatique.
+
+Pour tester : équiper la canne, garder la visée enregistrée désactivée et effectuer plusieurs prises sans déplacer la souris. Si une attente de 15 s subsiste, exporter le diagnostic pendant l’attente : il distingue canne indisponible, absence de signal et attente du mini-jeu. Un signal d’activation n’est pas une preuve d’appât apparu.
+
+**542 vérifications en simulation ; cette version reste à confirmer dans Roblox/Xeno.** Voir [tests/VALIDATION_V122.md](tests/VALIDATION_V122.md).
+
+---
+
 # Correctif V1.2.1 — relance pêche
 
 Le lancer **classique** revient par défaut. Place le curseur vers l’eau : aucun spot ni contrôle Mouse.Hit n’est imposé à la canne. Le clic du mini-jeu vise toujours sa barre puis tente de remettre le curseur à sa position initiale dans Roblox.

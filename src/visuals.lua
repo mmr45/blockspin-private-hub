@@ -265,6 +265,11 @@ function D.refreshVisuals()
     D.value('sales',m.sales);D.value('deposits',m.deposits);D.value('baitUsed',m.baitUsed);D.value('baitAdded',m.baitAdded)
     D.value('saleEarnings',shortMoney(m.earned));D.value('observedDown',shortMoney(m.observedDecreases))
     D.value('fishingInput',S.fishingInputStatus or (S.baitScreenPoint and 'Écran enregistré' or 'Visée à capturer'))
+    if S.castDiagnostic then
+        local c=S.castDiagnostic
+        D.value('rodState',(c.tool or 'Aucune canne')..(c.enabled==false and ' · indisponible' or '')..' · '..c.accepted..' signaux')
+        D.value('castWait',(c.detail or 'En attente')..(isNum(c.wait) and string.format(' · %.1f s',math.max(0,c.wait)) or ''))
+    end
     local state=S.moneyReading
     local masked=state and (state.status:find('masque',1,true) or state.status:find('non visible',1,true))
     D.value('moneyStatus',state and (state.available and 'Actif' or (masked and 'Masqué' or (#S.moneyCandidates>0 and 'À choisir' or 'Non trouvé'))) or 'Recherche')

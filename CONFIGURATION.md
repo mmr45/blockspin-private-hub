@@ -1,6 +1,6 @@
-# Configuration et travail restant — V1.2.1
+# Configuration et travail restant — V1.2.2
 
-Mis à jour le 6 novembre 2026. Ce document distingue les réglages utilisateur, les branchements internes et les essais Roblox. Le code V1.2.1 est testé hors jeu ; aucune confirmation Roblox/Xeno de cette version.
+Mis à jour le 6 novembre 2026. Ce document distingue les réglages utilisateur, les branchements internes et les essais Roblox. Le code V1.2.2 est testé hors jeu ; aucune confirmation Roblox/Xeno de cette version.
 
 ## Ce que cette version apporte
 
@@ -25,8 +25,10 @@ Mis à jour le 6 novembre 2026. Ce document distingue les réglages utilisateur,
 2. Sauvegarder explicitement la bibliothèque pour conserver spots et destinations. Une capture après création actualise le spot en mémoire.
 3. Régler pêche automatique, cycle automatique et action sur signal rare. Par défaut, le signal rare ne déclenche ni vente ni sortie.
 4. Laisser Roblox au premier plan pour les entrées de pêche. La perte de focus suspend les entrées ; le script ne force pas le focus.
-5. Relance après une manche : 0,35 s par défaut, réglable dans Fishing (0,75 / 1,5 / 2,5 s). Le retry 8 s reste appliqué aux tentatives sans mini-jeu ; un ancien zéro d’appâts devenu invisible ne bloque plus.
-6. Les compteurs de lancers, clics, textes et signaux rares sont des observations distinctes. Ils ne constituent pas un nombre garanti de poissons capturés.
+5. Relance après une manche : 0,35 s par défaut, réglable dans Fishing (0,75 / 1,5 / 2,5 s). Le retry 8 s reste prudent après un signal reçu ou un appel non vérifiable sans mini-jeu ; une activation ignorée suit la récupération bornée décrite ci-dessous. Un ancien zéro d’appâts devenu invisible ne bloque plus.
+6. Vérifier les lignes Canne/activation et Relance. Les demandes, signaux Tool.Activated et appels non vérifiés sont séparés ; un Tool.Enabled faux est attendu, jamais forcé. Un appel ignoré est réessayé avec backoff 0,5/1/2/4 s. Le retry 8 s reste prudent après signal reçu ou signal inaccessible sans mini-jeu.
+7. Si un délai anormal persiste, exporter le diagnostic de relance pendant cette attente : 40 transitions locales maximum, sans pseudo ni JobId.
+8. Les compteurs de lancers, clics, textes et signaux rares sont des observations distinctes. Ils ne constituent pas un nombre garanti de poissons capturés.
 
 ### Véhicule et itinéraires
 
@@ -123,6 +125,7 @@ Dans la portée locale du script : `S.setPlantObserver(fn)` reçoit un lecteur e
 | `blockspin-observatory-v1.json` | Favoris, 30 bilans maximum, instantané de 50 plantes maximum | Bouton sauvegarder favoris/session/timers ; fichier invalide préservé |
 | `blockspin-session-export.json` | Export du bilan et événements de la session | Export explicite si presse-papiers indisponible |
 | `blockspin-plant-diagnostic.json` | Chemins/textes des paires candidates réellement trouvées | Export agricole explicite ; jamais transmis automatiquement |
+| `blockspin-fishing-diagnostic.json` | Phases/horodatages, état et demandes/signaux de canne | Export explicite si presse-papiers absent ; aucun envoi automatique |
 | `blockspin_fishlog.json` | Textes de capture potentiels observés, mécanisme historique | Mise à jour après nouvelle observation de texte ; ce ne sont pas des captures confirmées |
 
 Les liaisons GUI agricoles et joueurs suivis restent propres à la session. Une restauration de timer ne recrée pas une liaison ni une preuve de propriété automatique. Aucune sauvegarde à la fermeture.
@@ -139,4 +142,4 @@ python -I tests/run_tests.py
 git diff --check
 ```
 
-Installer `requirements-test.txt` dans un venv pour les tests (`lupa==2.8`). Voir `tests/VALIDATION_V121.md`, `tests/VALIDATION_V12.md` et `tests/MANUAL.md`. Livrer par PR vers main ; ne pas fusionner automatiquement.
+Installer `requirements-test.txt` dans un venv pour les tests (`lupa==2.8`). Voir `tests/VALIDATION_V122.md`, `tests/VALIDATION_V121.md`, `tests/VALIDATION_V12.md` et `tests/MANUAL.md`. Livrer par PR vers main ; ne pas fusionner automatiquement.

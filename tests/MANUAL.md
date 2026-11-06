@@ -101,3 +101,13 @@ Aucun cas de cette version n'a été exécuté en jeu. Consigner chaque résulta
 57. Vérifier un vrai zéro d’appâts visible, puis fermer son affichage/restocker. Une ancienne valeur cachée ne doit pas rester bloquante. Vérifier que le jeu refuse naturellement un lancer sans appât.
 58. STOP, perte de focus, inventaire plein, saisie de texte et changement de mode pendant un lancer différé : aucun lancer parasite. Le curseur ne doit jamais être déplacé par le correctif vers une autre application.
 59. En option seulement, activer la visée enregistrée et vérifier les contrôles stricts. La désactiver doit rendre le lancer classique sans effacer les spots. Recharger un profil et vérifier les deux nouveaux réglages.
+
+
+## V1.2.2 — canne et activations ignorées (à faire dans Roblox)
+
+60. Tester plusieurs prises : mesurer disparition du mini-jeu → appât réellement apparu, pas seulement le compteur d’appels. Confirmer version 1.2.2 et état des nouveaux réglages. Le retour reçu après 1.2.1 est un délai d’au moins 15 s ; ne pas le considérer résolu sans ce test réel.
+61. Observer Canne/activation et Relance : canne indisponible doit attendre naturellement, puis activer au retour de Enabled, sans modifier Enabled ni la protection du jeu.
+62. Vérifier l’appui/relâchement complet ; STOP/F12, perte de focus, pause, changement de mode et fermeture ne doivent pas laisser une pression maintenue. Aucun nouveau clic ou prise de focus vers une autre application.
+63. Si le lancer reste lent, exporter le diagnostic pendant l’attente. Vérifier version, phase, demandes/signaux/appels non vérifiés, dernier mini-jeu, canne et durée de retry. Ne pas déduire la présence d’un appât d’un signal Activated seul.
+64. Vérifier qu’une animation de disparition avec CanvasGroup transparent n’est pas prise pour un mini-jeu toujours actif. Un panneau réellement visible continue de bloquer les nouveaux lancers.
+65. Remplacer/rééquiper la canne, tester mode classique et assistance optionnelle. Si le comportement du vrai Tool diffère du modèle de pression, consigner les observations avant toute autre accélération ou inférence de cooldown serveur.
