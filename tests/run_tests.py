@@ -89,6 +89,7 @@ if "--pure" not in sys.argv:
     lua.execute((ROOT / "tests" / "test_visual_dashboard.lua").read_text(encoding="utf-8"))
     lua.execute((ROOT / "tests" / "test_money_fishing_fixes.lua").read_text(encoding="utf-8"))
     lua.execute((ROOT / "tests" / "test_observatory.lua").read_text(encoding="utf-8"))
+    lua.execute((ROOT / "tests" / "test_fishing_recast.lua").read_text(encoding="utf-8"))
 
 failed = [r for r in results if not r[1]]
 print("\n%d verifications, %d echec(s)" % (len(results), len(failed)))

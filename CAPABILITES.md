@@ -1,3 +1,19 @@
+# Correctif V1.2.1 — 2026-11-06
+
+Retour utilisateur : relance lente et curseur à bouger depuis la modification de visée. Causes plausibles identifiées dans le code ; correction non confirmée dans Roblox.
+
+| Changement | Preuve locale | Limite |
+|---|---|---|
+| Mode classique par défaut | Spot sans visée et Mouse.Hit indisponible ne bloquent pas Tool:Activate ; aucune souris simulée nécessaire au lancer | Position initiale du curseur à orienter vers l’eau ; activation acceptée ≠ poisson réellement capturé |
+| Curseur après mini-jeu | Clic ciblé puis retour au point initial à l’écran | Ordre des événements et traitement réel du moteur à vérifier |
+| Relance après manche | Quatre manches courtes relancées après 0,35 s, sans retry 8 s résiduel ; aucun spam sans réponse | Fermeture du mini-jeu observée, pas une preuve de capture ou de fin de cooldown côté jeu |
+| Appâts | Zéro visible respecté, ancien zéro masqué/disparu rendu inconnu | Données affichées nécessaires ; le jeu garde ses propres contrôles |
+| Régression | 511 vérifications, 0 échec ; assistance stricte, STOP/focus et autres modules conservés | Simulation seulement |
+
+Voir [tests/VALIDATION_V121.md](tests/VALIDATION_V121.md). Version à valider dans Roblox/Xeno.
+
+---
+
 # Capacités V1.2.0 — 2026-11-06
 
 **482 vérifications locales, 0 échec ; aucune validation Roblox/Xeno V1.2.** Les captures réelles V1.1.0 confirment seulement l'affichage de cette ancienne UI.

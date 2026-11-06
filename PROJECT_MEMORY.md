@@ -1,3 +1,15 @@
+# V1.2.1 — régression de relance pêche — 2026-11-06
+
+- Base : main `abc178d8ed7e6e828bf28358170976a09b0d8e1f`, PR #7 fusionnée par l’utilisateur. Branche dédiée `fix/v1.2.1-fishing-recast`, livraison par PR sans fusion automatique.
+- Retour utilisateur reçu après livraison de la ligne V1.2.0 : pêche moins rapide depuis la modification de visée/appâts, relance qui semble nécessiter de bouger le curseur. Cela confirme une gêne réelle, pas la cause exacte ni un essai du correctif.
+- Causes plausibles identifiées dans le code : visée stricte obligatoire avec attente `Mouse.Hit`, déplacement du curseur par le clic du mini-jeu, délai de retry 8 s appliqué même après une manche observée, ancien zéro d’appâts caché pouvant rester bloquant.
+- Lancer classique par défaut, sans visée enregistrée obligatoire ni dépendance à Mouse.Hit. Assistance enregistrée conservée en option explicite dans Fishing ; les anciens spots restent intacts et les tests stricts 1.1.1 passent en mode optionnel.
+- Clic natif toujours ciblé sur la barre, puis retour au curseur initial uniquement si celui-ci était dans le viewport et que focus/jeton restent valides. Aucun clic OS à une position inconnue, aucune prise de focus forcée.
+- Fin de mini-jeu observée : relance après 0,35 s par défaut (réglable), sans attente résiduelle de 8 s. Si aucun mini-jeu ne répond à l’activation, retry 8 s conservé. Une disparition trop courte ne provoque pas de relance si le panneau revient avant le délai.
+- Appâts : zéro visible toujours bloquant ; source cachée/détachée/illisible devient inconnue et ne bloque plus sur son ancien zéro. Les statistiques existantes sont conservées.
+- STOP, focus, saisie, réglage en cours, inventaire plein et changements de mode annulent/suspendent les actions concernées. Les réglages aimAssist/recastDelay sont validés et conservés dans profils/imports.
+- 511 vérifications locales, 0 échec (482 conservées + 29 nouvelles). Tests : quatre manches courtes consécutives sans mouvement manuel, délai/absence de spam, curseur restauré, source x0 périmée, focus, STOP, migration et option stricte. **Aucun essai Roblox/Xeno V1.2.1 confirmé**. Voir tests/VALIDATION_V121.md.
+
 # V1.2.0 — observatoire, plantes et configuration — 2026-11-06
 
 - Base : main `da0c0efd647cc1af379169a136fc5733fffc9c21`, PR #6 fusionnée par l'utilisateur. Branche dédiée `feat/v1.2-workspace-tools`, nouvelle PR sans fusion automatique.

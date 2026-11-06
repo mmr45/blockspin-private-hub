@@ -33,8 +33,9 @@ check('UI : interrupteur visuel actif', row.track.Visible and row.knob.Position.
 M.click('[ON]  Peche automatique')
 check('UI : interrupteur visuel desactive', row.knob.Position.X.Offset==3 and not S.fishingEnabled)
 M.click('Poisson rare')
-local enumRow=S.design.rows[3]
-check('UI : selecteur distinct d\'un interrupteur', not enumRow.track.Visible and enumRow.value.Text=='quitter le serveur')
+local enumRow
+for _,entry in ipairs(S.design.rows) do if entry.button.Text:find('^Poisson rare :') then enumRow=entry end end
+check('UI : selecteur distinct d\'un interrupteur', enumRow and not enumRow.track.Visible and enumRow.value.Text=='quitter le serveur')
 for i=1,4 do M.click('Statistics');M.click('Settings');M.click('Fishing') end
 check('UI transitions : contenu visible apres changements repetes', S.design.content.GroupTransparency==0)
 local selected=0
