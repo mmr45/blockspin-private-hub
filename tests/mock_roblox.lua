@@ -150,6 +150,9 @@ M.workspace = workspace
 local Players = new('Players', 'Players', DataModel)
 local player = new('Player', 'Player1', Players)
 Players.LocalPlayer = player
+Players.MaxPlayers=30;Players.PlayerAdded=Signal();Players.PlayerRemoving=Signal()
+function Players:GetPlayers() return self:GetChildren() end
+M.Players=Players
 player.Name='mmr45'; player.DisplayName='Osman'; player.UserId=143872552
 function Players:GetUserThumbnailAsync(id,kind,size)
     M.thumbnailCalls=(M.thumbnailCalls or 0)+1
@@ -295,6 +298,9 @@ function Path:CreatePath()
 end
 TweenInfo = { new = function(...) return { ... } end }
 ColorSequence = { new = function(...) return { ... } end }
+ColorSequenceKeypoint={new=function(t,c) return {Time=t,Value=c} end}
+NumberSequence={new=function(...) return {...} end}
+NumberSequenceKeypoint={new=function(t,v) return {Time=t,Value=v} end}
 local TweenService = {}
 function TweenService:Create(o, info, props) M.tweenCount=(M.tweenCount or 0)+1
     local tween={Completed=Signal(),PlaybackState=Enum.PlaybackState.Begin,cancelled=false}
@@ -314,6 +320,7 @@ function TweenService:Create(o, info, props) M.tweenCount=(M.tweenCount or 0)+1
     return tween end
 local services = { TweenService = TweenService, Players = Players, RunService = RunService, UserInputService = UIS, VirtualInputManager = VIM, HttpService = Http, PathfindingService = Path }
 game = DataModel
+game.JobId='mock-job-123';game.PlaceId=104715542330896
 function DataModel:GetService(n) return services[n] or error('service inconnu ' .. n) end
 M.RunService, M.UIS = RunService, UIS
 

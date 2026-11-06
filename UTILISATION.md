@@ -1,3 +1,17 @@
+# Interface 1.1.0 — nouveautés
+
+Cette version ajoute la catégorie **Server** et un tableau visuel. Les anciennes explications de la 1.0 ci-dessous restent utiles pour les activités et les fichiers.
+
+- **Couleur à la souris** : Settings → faire glisser le curseur sur le plan saturation/luminosité et la barre de teinte. L’interface donne un aperçu ; cliquer **Appliquer la couleur** pour sauvegarder ou **Annuler la couleur** pour revenir à l’accent enregistré. L’hexadécimal, les pastilles et les profils restent disponibles. Le tactile est aussi géré. Le masquage, une perte de focus, STOP ou un changement de catégorie abandonne le glisser en cours.
+- **Affichage** : photo Roblox en haut, jauge d’inventaire, cartes de chiffres, listes de spots/trajets/profils cliquables, graphiques FPS/ping et journal technique replié. Cliquer une ligne de bibliothèque préremplit le champ ; les boutons d’action restent nécessaires pour sélectionner un spot ou lancer un trajet.
+- **Réglages** : curseur d’échelle 75–150 % (appliqué au relâchement), densité normale/compacte, métriques de l’en-tête, overlay, annonces et masquage pendant le mini-jeu. Ces réglages restent enregistrés avec les profils.
+- **Serveur** : population et capacité, ping vers le serveur, identifiant public, joueurs présents paginés par huit et dernières arrivées/départs observés. L’historique commence à l’ouverture du hub, reste en mémoire, et est borné à 80 événements. Les joueurs déjà présents ne sont pas présentés comme des arrivées récentes.
+- **Localisation** : « Non fournie ». Roblox n’expose pas la région physique du serveur dans l’API client publique. Le hub n’utilise ni le pays ni l’adresse IP du joueur pour l’inventer.
+
+Le loader de `main` ne charge cette version qu’après fusion de sa PR. Le script complet généré de la branche permet de l’essayer avant fusion. Aucun rendu réel 1.1.0 n’a été validé dans Roblox/Xeno ; voir `tests/VALIDATION_V11.md`.
+
+---
+
 # BlockSpin Private Hub 1.0.0 — Black Edition
 
 Cette version est développée depuis `main` 0.9.1 (`c0da490`) sur `feat/v1.0.0-private-hub`.

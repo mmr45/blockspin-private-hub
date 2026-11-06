@@ -35,6 +35,7 @@ function D.icon(parent, name, c)
     elseif name=='Vehicle' then l(3,9,16,8);l(6,5,10,2);l(5,5,2,7,25);l(15,5,2,7,-25);l(4,16,3,4);l(15,16,3,4)
     elseif name=='Money' then l(2,5,18,14);l(12,9,8,6);l(14,11,2,2);l(5,2,10,2,-12)
     elseif name=='Farming' then l(10,9,2,12);l(3,6,9,3,35);l(11,4,9,3,-35);l(6,16,10,2)
+    elseif name=='Server' then l(3,3,16,2);l(3,8,16,2);l(3,13,16,2);l(3,18,16,2);l(3,3,2,7);l(17,3,2,7);l(3,13,2,7);l(17,13,2,7)
     elseif name=='Statistics' then l(3,13,3,7);l(9,8,3,12);l(15,3,3,17)
     else l(3,5,16,2);l(3,11,16,2);l(3,17,16,2);l(7,2,3,7);l(13,8,3,7);l(6,14,3,7) end
     return host,pieces
@@ -46,6 +47,14 @@ end
 function D.animate(o, seconds, props)
     if not o or not o.Parent or D.closed then return end
     local previous=D.tweens[o]
+    if D.fastPreview then
+        if previous then
+            if previous.connection then previous.connection:Disconnect() end
+            pcall(function() previous.tween:Cancel() end);D.tweens[o]=nil
+        end
+        for key,value in pairs(props) do o[key]=value end
+        return
+    end
     local unchanged=true
     for k,v in pairs(props) do if o[k]~=v then unchanged=false end end
     if previous then
@@ -79,6 +88,7 @@ function D.finishAnimations()
     D.tweens={}
 end
 function D.cleanup()
+    if D.cancelPointer then D.cancelPointer() end
     D.visibilityToken=D.visibilityToken+1
     D.finishAnimations(); D.closed=true
 end
@@ -97,11 +107,11 @@ function D.hover(button, border)
     end) end
 end
 local pageTitles={Fishing='Pêche & automatisation',Vehicle='Votre garage',Money='Bilan de session',
-    Farming='Culture & parcelles',Statistics='Tableau de bord',Settings='Votre espace, vos réglages'}
+    Farming='Culture & parcelles',Statistics='Tableau de bord',Settings='Votre espace, vos réglages',Server='Votre serveur'}
 local descriptions={Fishing='Vos spots. Votre rythme. Tout au même endroit.',Vehicle='Enregistrez vos trajets et retrouvez vos destinations.',
     Money='Un regard clair sur les montants réellement observés.',Farming='Préparez vos cultures et suivez vos parcelles.',
-    Statistics='L’activité et les chiffres de votre session.',Settings='Personnalisez chaque détail du hub.'}
-local defaults={Fishing='Automatisation',Vehicle='Conduite',Money='Votre argent',Farming='Vos cultures',Statistics='Vue d’ensemble',Settings='Personnalisation'}
+    Statistics='L’activité et les chiffres de votre session.',Settings='Des couleurs et des réglages qui vous ressemblent.',Server='Les joueurs et les mouvements de cette session.'}
+local defaults={Fishing='Automatisation',Vehicle='Conduite',Money='Votre argent',Farming='Vos cultures',Statistics='Vue d’ensemble',Settings='Personnalisation',Server='Vue du serveur'}
 function D.newCard(page, title)
     local meta=D.pages[page]
     local card=make('Frame',{Name='Card',BackgroundColor3=theme.surface,BorderSizePixel=0,
@@ -126,7 +136,9 @@ function D.section(parent,title)
 end
 function D.addPage(page,name)
     local hero=make('Frame',{Name='SessionTiles',Size=UDim2.new(1,0,0,66),BackgroundTransparency=1,LayoutOrder=0},page)
-    local keys={'INVENTAIRE','APPÂTS','SESSION'}
+    local tileNames={Fishing={'INVENTAIRE','APPÂTS','LANCERS'},Vehicle={'VÉHICULE','DESTINATIONS','POINTS'},Money={'GAINS','PORTEFEUILLE','ESTIMATION'},
+        Farming={'PLANTATIONS','RÉCOLTES','PASSAGES'},Statistics={'SESSION','LANCERS','ERREURS'},Settings={'ACCENT','ÉCHELLE','ANIMATIONS'},Server={'JOUEURS','CAPACITÉ','PING'}}
+    local keys=tileNames[name] or {'INVENTAIRE','APPÂTS','SESSION'}
     local values={}
     for i,key in ipairs(keys) do
         local tile=make('Frame',{BackgroundColor3=theme.surface,BorderSizePixel=0,Size=UDim2.new(1/3,-9,1,0),
@@ -158,7 +170,11 @@ function D.navButton(name,callback)
     return b
 end
 function D.navigation(pages,active)
-    local changed=D.active~=active;D.active=active
+    local previous=D.active;local changed=previous~=active;D.active=active
+    if changed then
+        D.cancelPointer()
+        if previous=='Settings' and D.picker then D.picker.cancel() end
+    end
     for _,item in ipairs(D.navItems) do
         local selected=item.name==active;item.selected=selected;item.mark.Visible=selected
         item.mark.BackgroundColor3=theme.accent
@@ -177,7 +193,7 @@ function D.navigation(pages,active)
     end
 end
 function D.decorateRow(b,raw)
-    local row={button=b}
+    local row={button=b,baseHeight=b.Size.Y.Offset}
     b.TextTransparency=1
     local padding=b:FindFirstChildOfClass('UIPadding')
     if padding then padding.PaddingLeft=UDim.new(0,0);padding.PaddingRight=UDim.new(0,0) end
@@ -223,6 +239,7 @@ function D.applyAccent()
 end
 function D.showMenu(visible,automatic)
     if D.closed then return end
+    if not visible and D.cancelPointer then D.cancelPointer();if D.picker then D.picker.cancel() end end
     D.visibilityToken=D.visibilityToken+1;local token=D.visibilityToken
     D.menuVisible=visible
     D.launcher.Visible=not visible and not automatic
@@ -243,15 +260,10 @@ S.setMenuVisible=D.showMenu
 function D.createChrome()
     D.sidebar=make('Frame',{Name='Sidebar',Size=UDim2.new(0,196,1,0),BackgroundColor3=color(12,13,16),BorderSizePixel=0},window)
     D.sidebarDivider=line(D.sidebar,195,0,1,640,theme.border);D.sidebarDivider.Size=UDim2.new(0,1,1,0)
-    local brand=make('Frame',{Name='Brand',BackgroundTransparency=1,Position=UDim2.fromOffset(20,26),Size=UDim2.fromOffset(156,42)},D.sidebar)
-    local badge=make('Frame',{BackgroundColor3=tint(theme.accent,14),Size=UDim2.fromOffset(34,34),BorderSizePixel=0},brand);corner(badge,9);D.bind(badge,'BackgroundColor3',function(c) return tint(c,14) end)
-    local monogram=text(badge,'B',22,theme.accent);monogram.Font=Enum.Font.GothamBold;monogram.Size=UDim2.fromScale(1,1);monogram.TextXAlignment=Enum.TextXAlignment.Center;D.bind(monogram,'TextColor3')
-    D.brandTitle=text(brand,'BLOCKSPIN',13,theme.text);D.brandTitle.Font=Enum.Font.GothamBold;D.brandTitle.Position=UDim2.fromOffset(44,-1);D.brandTitle.Size=UDim2.fromOffset(118,22)
-    D.brandCaption=text(brand,'PRIVATE / BLACK EDITION',8,theme.muted);D.brandCaption.Position=UDim2.fromOffset(44,19);D.brandCaption.Size=UDim2.fromOffset(128,16)
     D.navCaption=text(D.sidebar,'WORKSPACE',9,color(96,99,112));D.navCaption.Position=UDim2.fromOffset(26,94);D.navCaption.Size=UDim2.new(1,-40,0,20)
-    D.nav=make('ScrollingFrame',{Name='Navigation',BackgroundTransparency=1,BorderSizePixel=0,Position=UDim2.fromOffset(0,126),Size=UDim2.new(1,0,1,-252),
-        CanvasSize=UDim2.fromOffset(0,336),ScrollBarThickness=0,ScrollingDirection=Enum.ScrollingDirection.Y},D.sidebar)
-    D.profile=make('Frame',{Name='RobloxProfile',Position=UDim2.new(0,12,1,-84),Size=UDim2.new(1,-24,0,68),BackgroundColor3=color(20,21,26),BorderSizePixel=0},D.sidebar)
+    D.nav=make('ScrollingFrame',{Name='Navigation',BackgroundTransparency=1,BorderSizePixel=0,Position=UDim2.fromOffset(0,126),Size=UDim2.new(1,0,1,-208),
+        CanvasSize=UDim2.fromOffset(0,392),ScrollBarThickness=0,ScrollingDirection=Enum.ScrollingDirection.Y},D.sidebar)
+    D.profile=make('Frame',{Name='RobloxProfile',Position=UDim2.fromOffset(12,20),Size=UDim2.new(1,-24,0,68),BackgroundColor3=color(20,21,26),BorderSizePixel=0},D.sidebar)
     corner(D.profile,9);stroke(D.profile)
     local avatarHolder=make('Frame',{Name='AvatarHolder',BackgroundColor3=color(35,37,44),Size=UDim2.fromOffset(38,38),Position=UDim2.fromOffset(10,15),ClipsDescendants=true,BorderSizePixel=0},D.profile);corner(avatarHolder,12)
     local fallback=text(avatarHolder,'?',18,theme.muted);fallback.Name='AvatarPlaceholder';fallback.Size=UDim2.fromScale(1,1);fallback.TextXAlignment=Enum.TextXAlignment.Center
@@ -259,6 +271,7 @@ function D.createChrome()
     local name=type(player.DisplayName)=='string' and player.DisplayName~='' and player.DisplayName or player.Name
     D.displayName=text(D.profile,tostring(name or 'Joueur Roblox'),12,theme.text);D.displayName.Name='DisplayName';D.displayName.Font=Enum.Font.GothamMedium;D.displayName.Position=UDim2.fromOffset(58,14);D.displayName.Size=UDim2.new(1,-64,0,20)
     D.username=text(D.profile,'@'..tostring(player.Name or 'Roblox'),10,theme.muted);D.username.Name='Username';D.username.Position=UDim2.fromOffset(58,35);D.username.Size=UDim2.new(1,-64,0,18)
+    D.brandTitle=D.displayName;D.brandCaption=D.username
     task.spawn(function()
         for attempt=1,3 do
             if not S.running or not avatar.Parent then return end
@@ -292,7 +305,7 @@ function D.createChrome()
     D.versionLabel=text(D.footer,'v'..VERSION..'  /  '..ui.hotkey..' : masquer',9,color(100,104,118));D.versionLabel.Position=UDim2.new(1,-198,0,0);D.versionLabel.Size=UDim2.fromOffset(164,40);D.versionLabel.TextXAlignment=Enum.TextXAlignment.Right
     D.resize=make('TextButton',{Name='Resize',Text='◢',TextSize=16,Font=Enum.Font.Gotham,TextColor3=color(100,104,118),BackgroundTransparency=1,
         Size=UDim2.fromOffset(24,24),Position=UDim2.new(1,-27,1,-27)},window)
-    D.launcher=make('TextButton',{Name='OpenHub',Text='B',Font=Enum.Font.GothamBold,TextSize=22,TextColor3=theme.accent,Visible=false,
+    D.launcher=make('TextButton',{Name='OpenHub',Text='☰',Font=Enum.Font.GothamBold,TextSize=22,TextColor3=theme.accent,Visible=false,
         BackgroundColor3=theme.surface,BorderSizePixel=0,Position=UDim2.new(0,16,1,-68),Size=UDim2.fromOffset(44,44),ZIndex=25},gui);corner(D.launcher,12);stroke(D.launcher);D.bind(D.launcher,'TextColor3')
     connect(D.launcher.Activated,function() D.showMenu(true) end)
 end
@@ -303,7 +316,7 @@ function D.layout()
     D.sidebarWidth=side
     D.sidebar.Size=UDim2.new(0,side,1,0);D.sidebarDivider.Position=UDim2.fromOffset(side-1,0)
     D.brandTitle.Visible=not compact;D.brandCaption.Visible=not compact;D.navCaption.Visible=not compact
-    D.profile.Position=UDim2.new(0,compact and 8 or 12,1,-84);D.profile.Size=UDim2.new(1,compact and -16 or -24,0,68)
+    D.profile.Position=UDim2.fromOffset(compact and 8 or 12,20);D.profile.Size=UDim2.new(1,compact and -16 or -24,0,68)
     D.displayName.Visible=not compact;D.username.Visible=not compact
     local holder=D.profile:FindFirstChild('AvatarHolder');holder.Position=UDim2.fromOffset(compact and 8 or 10,15)
     D.header.Position=UDim2.fromOffset(side,0);D.header.Size=UDim2.new(1,-side,0,100)
@@ -316,6 +329,8 @@ function D.layout()
     for _,item in ipairs(D.navItems) do
         item.title.Visible=not compact;item.icon.Position=UDim2.fromOffset(compact and 13 or 14,13)
     end
+    for _,row in ipairs(D.rows) do row.button.Size=UDim2.new(1,0,0,ui.density=='compact' and math.max(38,row.baseHeight-8) or row.baseHeight) end
+    if D.picker and D.picker.layout then D.picker.layout() end
     local twoColumns=w-side-40>=600
     for page,meta in pairs(D.pages) do
         local heights={0,0}
@@ -364,6 +379,9 @@ function D.refresh()
         meta.tiles[3].Text=string.format('%02d:%02d',math.floor(elapsed/60),math.floor(elapsed%60))
     end
     D.stateLabel.TextColor3=S.state=='ERROR' and color(255,116,135) or theme.muted
+    if D.refreshVisuals then D.refreshVisuals() end
     D.layout()
 end
+--@@VISUALS@@
+
 end

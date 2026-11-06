@@ -1,3 +1,15 @@
+# V1.1.0 — tableau visuel et serveur — 2026-11-06
+
+- Base : main `39feadb0a1fd722624b3ca11c8c21742eef35dad` (PR #4 fusionnée par l’utilisateur). Nouvelle branche `feat/v1.1-visual-dashboard`, nouvelle PR à relire sans fusion automatique.
+- Demande : supprimer les pavés de texte, avatar à la place du logo B en haut, palette choisie à la souris, réglages plus clairs et rubrique serveur.
+- Ajouts : sélecteur HSV souris/tactile avec aperçu, application/annulation explicites ; pas d’écriture ni de nouveau tween par pixel. Palette, hex et profils synchronisés.
+- Profil Roblox déplacé en haut. Compteurs, jauges, listes cliquables, graphiques FPS/ping réels bornés à 30 mesures ; journal technique replié.
+- Échelle réglable au glisser, densité compacte, métriques et masquage du mini-jeu configurables. Listes de spots/trajets/profils préremplissent les champs sans lancer d’activité.
+- Page Server : population/capacité, ping, identifiant, liste paginée des présents, dernières arrivées/départs observés depuis l’ouverture. Historique borné à 80, non sauvegardé, observateurs déconnectés à l’arrêt.
+- **La région physique du serveur n’est pas exposée par l’API client publique.** Elle reste « Non fournie ». Ne jamais la déduire du pays du joueur ou de son IP.
+- Source de widgets : `src/visuals.lua`, injectée dans la portée privée de `src/interface.lua` par `build.py`. Le script complet actif reste `src/main.lua`, généré.
+- Tests locaux : 310 vérifications, 0 échec ; maquettes HTML issues de la simulation inspectées. Aucune validation de rendu Roblox/Xeno réelle. Auto Farm toujours sans adaptateur BlockSpin.
+
 # Refonte de présentation V1 — 2026-11-06
 
 - Demande explicite : UI soignée inspirée des captures fournies, transitions fluides, avatar Roblox, DisplayName et @username. Ajouter à la PR #4, sans fusion.

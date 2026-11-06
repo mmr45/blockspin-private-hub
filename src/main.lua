@@ -1,10 +1,10 @@
--- BlockSpin Hub v1.0.0
+-- BlockSpin Hub v1.1.0
 -- Peche auto (logique v0.6.8 conservee) + cycle vente/ATM par conduite NATIVE sur route
 -- (touches simulees W/A/S/D, aucun deplacement de CFrame, aucune teleportation).
 -- Aucun passage sous la carte : non implemente volontairement (voir README_v080.md).
 -- Arret complet : getgenv().BlockSpinCycle080.stop()
 -- Arret d'urgence du cycle/conduite (le script reste charge) : F12
-local VERSION = '1.0.0'
+local VERSION = '1.1.0'
 local E = (getgenv and getgenv()) or _G
 
 ---------------------------------------------------------------------------
@@ -198,6 +198,57 @@ function Core:farmAction(plot, crop, replant)
     if observed.state == 'ready' and observed.crop == crop then return { kind = 'harvest', plot = plot, crop = crop, replant = replant } end
     if observed.state == 'empty' then return { kind = 'plant', plot = plot, crop = crop } end
     return nil, 'etat ou culture inattendu : aucune action'
+end
+-- Couleur et observateur serveur purs ; aucune geolocalisation deduite.
+function Core.hsvToHex(h,s,v)
+    if not finite(h) or not finite(s) or not finite(v) then return nil end
+    h=h%1;s=math.max(0,math.min(1,s));v=math.max(0,math.min(1,v))
+    local c=v*s;local x=c*(1-math.abs((h*6)%2-1));local m=v-c
+    local rgb={{c,x,0},{x,c,0},{0,c,x},{0,x,c},{x,0,c},{c,0,x}}
+    local a=rgb[math.floor(h*6)+1]
+    return string.format('%02X%02X%02X',math.floor((a[1]+m)*255+0.5),math.floor((a[2]+m)*255+0.5),math.floor((a[3]+m)*255+0.5))
+end
+function Core.hexToHSV(hex)
+    if type(hex)~='string' or not hex:match('^%x%x%x%x%x%x$') then return nil end
+    local r,g,b=tonumber(hex:sub(1,2),16)/255,tonumber(hex:sub(3,4),16)/255,tonumber(hex:sub(5,6),16)/255
+    local hi,lo=math.max(r,g,b),math.min(r,g,b);local d=hi-lo;local h=0
+    if d>0 then
+        if hi==r then h=((g-b)/d)%6 elseif hi==g then h=(b-r)/d+2 else h=(r-g)/d+4 end
+        h=h/6
+    end
+    return h,hi==0 and 0 or d/hi,hi
+end
+function Core.newServer(now,maxPlayers)
+    local server={started=now,players={},events={},joined=0,left=0,count=0,revision=0,maxPlayers=maxPlayers,region=nil}
+    function server:add(id,name,display,now,baseline)
+        if not finite(id) or id<1 or id%1~=0 or self.players[id] then return false end
+        self.players[id]={id=id,name=tostring(name or '?'):sub(1,64),display=tostring(display or name or '?'):sub(1,64),observed=now,baseline=not not baseline}
+        self.count=self.count+1;self.revision=self.revision+1
+        if not baseline then
+            self.joined=self.joined+1
+            bounded(self.events,{kind='join',player=copy(self.players[id]),at=now},80)
+        end
+        return true
+    end
+    function server:remove(id,now)
+        local p=self.players[id];if not p then return false end
+        bounded(self.events,{kind='leave',player=copy(p),at=now},80)
+        self.players[id]=nil;self.count=self.count-1;self.left=self.left+1;self.revision=self.revision+1
+        return true
+    end
+    function server:roster()
+        local rows={};for _,p in pairs(self.players) do rows[#rows+1]=copy(p) end
+        table.sort(rows,function(a,b) return a.name:lower()==b.name:lower() and a.id<b.id or a.name:lower()<b.name:lower() end)
+        return rows
+    end
+    function server:recent(kind,limit)
+        local rows={}
+        for i=#self.events,1,-1 do
+            if self.events[i].kind==kind then rows[#rows+1]=copy(self.events[i]);if #rows>=(limit or 6) then break end end
+        end
+        return rows
+    end
+    return server
 end
 Core.copy = copy
 return Core
@@ -1233,6 +1284,7 @@ local function cancelAll(reason)
     if reason then logLine('ANNULATION : ' .. reason) end
 end
 S.cancel = function()
+    if S.design and S.design.cancelPointer then S.design.cancelPointer() end
     cancelAll('demande utilisateur (F12)')
     S.autoCycle = false
     S.paused = true
@@ -1621,9 +1673,9 @@ end
 ---------------------------------------------------------------------------
 local SETTINGS_FILE = 'blockspin-settings-v1.json'
 local ui = { accent = 'FF475C', hotkey = 'RightShift', scale = 1, metrics = true, overlay = false, hideInMinigame = true,
-    speedPreset = 'Rapide', rareAction = 'none', rarePurple = true, toasts = true, animations = true, layoutVersion = 2 }
+    speedPreset = 'Rapide', rareAction = 'none', rarePurple = true, toasts = true, animations = true, layoutVersion = 2, density = 'normal' }
 local PREF_KEYS = { 'accent', 'hotkey', 'scale', 'metrics', 'overlay', 'hideInMinigame', 'speedPreset', 'rareAction', 'rarePurple', 'toasts', 'animations',
-    'position', 'size', 'overlayPosition', 'layoutVersion' }
+    'position', 'size', 'overlayPosition', 'layoutVersion', 'density' }
 local RARE_ACTIONS = { none = 'ne rien faire', leave = 'quitter le serveur', sell = 'aller vendre' }
 local settingsRaw -- fichier lu en entier : profils et champs du hub 0.4.0 conserves
 local function validKeyName(n)
@@ -1632,6 +1684,7 @@ local function validKeyName(n)
     return ok and k ~= nil
 end
 local function readPrefs(d, into)
+    if d.density=='normal' or d.density=='compact' then into.density=d.density end
     if type(d.accent) == 'string' and d.accent:match('^%x%x%x%x%x%x$') then into.accent = d.accent end
     if validKeyName(d.hotkey) then into.hotkey = d.hotkey end
     if isNum(d.scale) and d.scale >= 0.75 and d.scale <= 1.5 then into.scale = d.scale end
@@ -1751,6 +1804,7 @@ function D.icon(parent, name, c)
     elseif name=='Vehicle' then l(3,9,16,8);l(6,5,10,2);l(5,5,2,7,25);l(15,5,2,7,-25);l(4,16,3,4);l(15,16,3,4)
     elseif name=='Money' then l(2,5,18,14);l(12,9,8,6);l(14,11,2,2);l(5,2,10,2,-12)
     elseif name=='Farming' then l(10,9,2,12);l(3,6,9,3,35);l(11,4,9,3,-35);l(6,16,10,2)
+    elseif name=='Server' then l(3,3,16,2);l(3,8,16,2);l(3,13,16,2);l(3,18,16,2);l(3,3,2,7);l(17,3,2,7);l(3,13,2,7);l(17,13,2,7)
     elseif name=='Statistics' then l(3,13,3,7);l(9,8,3,12);l(15,3,3,17)
     else l(3,5,16,2);l(3,11,16,2);l(3,17,16,2);l(7,2,3,7);l(13,8,3,7);l(6,14,3,7) end
     return host,pieces
@@ -1762,6 +1816,14 @@ end
 function D.animate(o, seconds, props)
     if not o or not o.Parent or D.closed then return end
     local previous=D.tweens[o]
+    if D.fastPreview then
+        if previous then
+            if previous.connection then previous.connection:Disconnect() end
+            pcall(function() previous.tween:Cancel() end);D.tweens[o]=nil
+        end
+        for key,value in pairs(props) do o[key]=value end
+        return
+    end
     local unchanged=true
     for k,v in pairs(props) do if o[k]~=v then unchanged=false end end
     if previous then
@@ -1795,6 +1857,7 @@ function D.finishAnimations()
     D.tweens={}
 end
 function D.cleanup()
+    if D.cancelPointer then D.cancelPointer() end
     D.visibilityToken=D.visibilityToken+1
     D.finishAnimations(); D.closed=true
 end
@@ -1813,11 +1876,11 @@ function D.hover(button, border)
     end) end
 end
 local pageTitles={Fishing='Pêche & automatisation',Vehicle='Votre garage',Money='Bilan de session',
-    Farming='Culture & parcelles',Statistics='Tableau de bord',Settings='Votre espace, vos réglages'}
+    Farming='Culture & parcelles',Statistics='Tableau de bord',Settings='Votre espace, vos réglages',Server='Votre serveur'}
 local descriptions={Fishing='Vos spots. Votre rythme. Tout au même endroit.',Vehicle='Enregistrez vos trajets et retrouvez vos destinations.',
     Money='Un regard clair sur les montants réellement observés.',Farming='Préparez vos cultures et suivez vos parcelles.',
-    Statistics='L’activité et les chiffres de votre session.',Settings='Personnalisez chaque détail du hub.'}
-local defaults={Fishing='Automatisation',Vehicle='Conduite',Money='Votre argent',Farming='Vos cultures',Statistics='Vue d’ensemble',Settings='Personnalisation'}
+    Statistics='L’activité et les chiffres de votre session.',Settings='Des couleurs et des réglages qui vous ressemblent.',Server='Les joueurs et les mouvements de cette session.'}
+local defaults={Fishing='Automatisation',Vehicle='Conduite',Money='Votre argent',Farming='Vos cultures',Statistics='Vue d’ensemble',Settings='Personnalisation',Server='Vue du serveur'}
 function D.newCard(page, title)
     local meta=D.pages[page]
     local card=make('Frame',{Name='Card',BackgroundColor3=theme.surface,BorderSizePixel=0,
@@ -1842,7 +1905,9 @@ function D.section(parent,title)
 end
 function D.addPage(page,name)
     local hero=make('Frame',{Name='SessionTiles',Size=UDim2.new(1,0,0,66),BackgroundTransparency=1,LayoutOrder=0},page)
-    local keys={'INVENTAIRE','APPÂTS','SESSION'}
+    local tileNames={Fishing={'INVENTAIRE','APPÂTS','LANCERS'},Vehicle={'VÉHICULE','DESTINATIONS','POINTS'},Money={'GAINS','PORTEFEUILLE','ESTIMATION'},
+        Farming={'PLANTATIONS','RÉCOLTES','PASSAGES'},Statistics={'SESSION','LANCERS','ERREURS'},Settings={'ACCENT','ÉCHELLE','ANIMATIONS'},Server={'JOUEURS','CAPACITÉ','PING'}}
+    local keys=tileNames[name] or {'INVENTAIRE','APPÂTS','SESSION'}
     local values={}
     for i,key in ipairs(keys) do
         local tile=make('Frame',{BackgroundColor3=theme.surface,BorderSizePixel=0,Size=UDim2.new(1/3,-9,1,0),
@@ -1874,7 +1939,11 @@ function D.navButton(name,callback)
     return b
 end
 function D.navigation(pages,active)
-    local changed=D.active~=active;D.active=active
+    local previous=D.active;local changed=previous~=active;D.active=active
+    if changed then
+        D.cancelPointer()
+        if previous=='Settings' and D.picker then D.picker.cancel() end
+    end
     for _,item in ipairs(D.navItems) do
         local selected=item.name==active;item.selected=selected;item.mark.Visible=selected
         item.mark.BackgroundColor3=theme.accent
@@ -1893,7 +1962,7 @@ function D.navigation(pages,active)
     end
 end
 function D.decorateRow(b,raw)
-    local row={button=b}
+    local row={button=b,baseHeight=b.Size.Y.Offset}
     b.TextTransparency=1
     local padding=b:FindFirstChildOfClass('UIPadding')
     if padding then padding.PaddingLeft=UDim.new(0,0);padding.PaddingRight=UDim.new(0,0) end
@@ -1939,6 +2008,7 @@ function D.applyAccent()
 end
 function D.showMenu(visible,automatic)
     if D.closed then return end
+    if not visible and D.cancelPointer then D.cancelPointer();if D.picker then D.picker.cancel() end end
     D.visibilityToken=D.visibilityToken+1;local token=D.visibilityToken
     D.menuVisible=visible
     D.launcher.Visible=not visible and not automatic
@@ -1959,15 +2029,10 @@ S.setMenuVisible=D.showMenu
 function D.createChrome()
     D.sidebar=make('Frame',{Name='Sidebar',Size=UDim2.new(0,196,1,0),BackgroundColor3=color(12,13,16),BorderSizePixel=0},window)
     D.sidebarDivider=line(D.sidebar,195,0,1,640,theme.border);D.sidebarDivider.Size=UDim2.new(0,1,1,0)
-    local brand=make('Frame',{Name='Brand',BackgroundTransparency=1,Position=UDim2.fromOffset(20,26),Size=UDim2.fromOffset(156,42)},D.sidebar)
-    local badge=make('Frame',{BackgroundColor3=tint(theme.accent,14),Size=UDim2.fromOffset(34,34),BorderSizePixel=0},brand);corner(badge,9);D.bind(badge,'BackgroundColor3',function(c) return tint(c,14) end)
-    local monogram=text(badge,'B',22,theme.accent);monogram.Font=Enum.Font.GothamBold;monogram.Size=UDim2.fromScale(1,1);monogram.TextXAlignment=Enum.TextXAlignment.Center;D.bind(monogram,'TextColor3')
-    D.brandTitle=text(brand,'BLOCKSPIN',13,theme.text);D.brandTitle.Font=Enum.Font.GothamBold;D.brandTitle.Position=UDim2.fromOffset(44,-1);D.brandTitle.Size=UDim2.fromOffset(118,22)
-    D.brandCaption=text(brand,'PRIVATE / BLACK EDITION',8,theme.muted);D.brandCaption.Position=UDim2.fromOffset(44,19);D.brandCaption.Size=UDim2.fromOffset(128,16)
     D.navCaption=text(D.sidebar,'WORKSPACE',9,color(96,99,112));D.navCaption.Position=UDim2.fromOffset(26,94);D.navCaption.Size=UDim2.new(1,-40,0,20)
-    D.nav=make('ScrollingFrame',{Name='Navigation',BackgroundTransparency=1,BorderSizePixel=0,Position=UDim2.fromOffset(0,126),Size=UDim2.new(1,0,1,-252),
-        CanvasSize=UDim2.fromOffset(0,336),ScrollBarThickness=0,ScrollingDirection=Enum.ScrollingDirection.Y},D.sidebar)
-    D.profile=make('Frame',{Name='RobloxProfile',Position=UDim2.new(0,12,1,-84),Size=UDim2.new(1,-24,0,68),BackgroundColor3=color(20,21,26),BorderSizePixel=0},D.sidebar)
+    D.nav=make('ScrollingFrame',{Name='Navigation',BackgroundTransparency=1,BorderSizePixel=0,Position=UDim2.fromOffset(0,126),Size=UDim2.new(1,0,1,-208),
+        CanvasSize=UDim2.fromOffset(0,392),ScrollBarThickness=0,ScrollingDirection=Enum.ScrollingDirection.Y},D.sidebar)
+    D.profile=make('Frame',{Name='RobloxProfile',Position=UDim2.fromOffset(12,20),Size=UDim2.new(1,-24,0,68),BackgroundColor3=color(20,21,26),BorderSizePixel=0},D.sidebar)
     corner(D.profile,9);stroke(D.profile)
     local avatarHolder=make('Frame',{Name='AvatarHolder',BackgroundColor3=color(35,37,44),Size=UDim2.fromOffset(38,38),Position=UDim2.fromOffset(10,15),ClipsDescendants=true,BorderSizePixel=0},D.profile);corner(avatarHolder,12)
     local fallback=text(avatarHolder,'?',18,theme.muted);fallback.Name='AvatarPlaceholder';fallback.Size=UDim2.fromScale(1,1);fallback.TextXAlignment=Enum.TextXAlignment.Center
@@ -1975,6 +2040,7 @@ function D.createChrome()
     local name=type(player.DisplayName)=='string' and player.DisplayName~='' and player.DisplayName or player.Name
     D.displayName=text(D.profile,tostring(name or 'Joueur Roblox'),12,theme.text);D.displayName.Name='DisplayName';D.displayName.Font=Enum.Font.GothamMedium;D.displayName.Position=UDim2.fromOffset(58,14);D.displayName.Size=UDim2.new(1,-64,0,20)
     D.username=text(D.profile,'@'..tostring(player.Name or 'Roblox'),10,theme.muted);D.username.Name='Username';D.username.Position=UDim2.fromOffset(58,35);D.username.Size=UDim2.new(1,-64,0,18)
+    D.brandTitle=D.displayName;D.brandCaption=D.username
     task.spawn(function()
         for attempt=1,3 do
             if not S.running or not avatar.Parent then return end
@@ -2008,7 +2074,7 @@ function D.createChrome()
     D.versionLabel=text(D.footer,'v'..VERSION..'  /  '..ui.hotkey..' : masquer',9,color(100,104,118));D.versionLabel.Position=UDim2.new(1,-198,0,0);D.versionLabel.Size=UDim2.fromOffset(164,40);D.versionLabel.TextXAlignment=Enum.TextXAlignment.Right
     D.resize=make('TextButton',{Name='Resize',Text='◢',TextSize=16,Font=Enum.Font.Gotham,TextColor3=color(100,104,118),BackgroundTransparency=1,
         Size=UDim2.fromOffset(24,24),Position=UDim2.new(1,-27,1,-27)},window)
-    D.launcher=make('TextButton',{Name='OpenHub',Text='B',Font=Enum.Font.GothamBold,TextSize=22,TextColor3=theme.accent,Visible=false,
+    D.launcher=make('TextButton',{Name='OpenHub',Text='☰',Font=Enum.Font.GothamBold,TextSize=22,TextColor3=theme.accent,Visible=false,
         BackgroundColor3=theme.surface,BorderSizePixel=0,Position=UDim2.new(0,16,1,-68),Size=UDim2.fromOffset(44,44),ZIndex=25},gui);corner(D.launcher,12);stroke(D.launcher);D.bind(D.launcher,'TextColor3')
     connect(D.launcher.Activated,function() D.showMenu(true) end)
 end
@@ -2019,7 +2085,7 @@ function D.layout()
     D.sidebarWidth=side
     D.sidebar.Size=UDim2.new(0,side,1,0);D.sidebarDivider.Position=UDim2.fromOffset(side-1,0)
     D.brandTitle.Visible=not compact;D.brandCaption.Visible=not compact;D.navCaption.Visible=not compact
-    D.profile.Position=UDim2.new(0,compact and 8 or 12,1,-84);D.profile.Size=UDim2.new(1,compact and -16 or -24,0,68)
+    D.profile.Position=UDim2.fromOffset(compact and 8 or 12,20);D.profile.Size=UDim2.new(1,compact and -16 or -24,0,68)
     D.displayName.Visible=not compact;D.username.Visible=not compact
     local holder=D.profile:FindFirstChild('AvatarHolder');holder.Position=UDim2.fromOffset(compact and 8 or 10,15)
     D.header.Position=UDim2.fromOffset(side,0);D.header.Size=UDim2.new(1,-side,0,100)
@@ -2032,6 +2098,8 @@ function D.layout()
     for _,item in ipairs(D.navItems) do
         item.title.Visible=not compact;item.icon.Position=UDim2.fromOffset(compact and 13 or 14,13)
     end
+    for _,row in ipairs(D.rows) do row.button.Size=UDim2.new(1,0,0,ui.density=='compact' and math.max(38,row.baseHeight-8) or row.baseHeight) end
+    if D.picker and D.picker.layout then D.picker.layout() end
     local twoColumns=w-side-40>=600
     for page,meta in pairs(D.pages) do
         local heights={0,0}
@@ -2080,8 +2148,298 @@ function D.refresh()
         meta.tiles[3].Text=string.format('%02d:%02d',math.floor(elapsed/60),math.floor(elapsed%60))
     end
     D.stateLabel.TextColor3=S.state=='ERROR' and color(255,116,135) or theme.muted
+    if D.refreshVisuals then D.refreshVisuals() end
     D.layout()
 end
+-- Widgets de presentation : nombres, jauges, listes et controles a la souris.
+D.widgets={};D.lists={};D.charts={}
+local function parentOf(parent) return D.parent(parent) end
+local function countKeys(t) local n=0;for _ in pairs(t or {}) do n=n+1 end;return n end
+local function shortMoney(n) return isNum(n) and string.format('%.0f $',n) or 'N/D' end
+local function frame(parent,name,height)
+    parent=parentOf(parent)
+    return make('Frame',{Name=name,BackgroundTransparency=1,Size=UDim2.new(1,0,0,height),LayoutOrder=D.order(parent)},parent)
+end
+function D.metricsGrid(parent,items,columns)
+    columns=columns or 2
+    local root=frame(parent,'MetricGrid',math.ceil(#items/columns)*88-8)
+    for i,item in ipairs(items) do
+        local box=make('Frame',{Name='Metric_'..item.id,BackgroundColor3=theme.control,BorderSizePixel=0,
+            Size=UDim2.new(1/columns,-5,0,80),Position=UDim2.new((i-1)%columns/columns,((i-1)%columns)*5,0,math.floor((i-1)/columns)*88)},root)
+        corner(box,8)
+        local cap=text(box,item.label,10,theme.muted);cap.Position=UDim2.fromOffset(12,8);cap.Size=UDim2.new(1,-24,0,18)
+        local value=text(box,'—',22,theme.text);value.Name='Value';value.Font=Enum.Font.GothamMedium;value.Position=UDim2.fromOffset(12,31);value.Size=UDim2.new(1,-24,0,30)
+        local dash=line(box,12,68,22,2,theme.accent);D.bind(dash,'BackgroundColor3')
+        D.widgets[item.id]=value
+    end
+    return root
+end
+function D.value(id,value)
+    local widget=D.widgets[id];if widget and widget.Parent then widget.Text=tostring(value or '—') end
+end
+function D.detail(parent,id,labelText,initial)
+    local root=frame(parent,'Detail_'..id,38)
+    local cap=text(root,labelText,11,theme.muted);cap.Size=UDim2.new(0.45,0,1,0)
+    local value=text(root,initial or '—',12,theme.text);value.Position=UDim2.fromScale(0.45,0);value.Size=UDim2.new(0.55,0,1,0);value.TextXAlignment=Enum.TextXAlignment.Right
+    D.widgets[id]=value;return value
+end
+function D.gauge(parent,id,labelText)
+    local root=frame(parent,'Gauge_'..id,48)
+    local cap=text(root,labelText,11,theme.muted);cap.Size=UDim2.new(0.65,0,0,20)
+    local value=text(root,'—',11,theme.text);value.Position=UDim2.fromScale(0.65,0);value.Size=UDim2.new(0.35,0,0,20);value.TextXAlignment=Enum.TextXAlignment.Right
+    local track=make('Frame',{Name='Track',Position=UDim2.fromOffset(0,33),Size=UDim2.new(1,0,0,5),BackgroundColor3=color(36,38,46),BorderSizePixel=0,ClipsDescendants=true},root);corner(track,3)
+    local fill=make('Frame',{Name='Fill',Size=UDim2.fromScale(0,1),BackgroundColor3=theme.accent,BorderSizePixel=0},track);corner(fill,3);D.bind(fill,'BackgroundColor3')
+    D.widgets[id]=value;D.widgets[id..'Fill']=fill
+end
+function D.setGauge(id,value,ratio)
+    D.value(id,value);local fill=D.widgets[id..'Fill']
+    if fill then D.animate(fill,0.24,{Size=UDim2.fromScale(clamp(isNum(ratio) and ratio or 0,0,1),1)}) end
+end
+function D.caption(parent,value)
+    local cap=text(parentOf(parent),value,10,theme.muted);cap.TextWrapped=true;cap.Size=UDim2.new(1,0,0,28);cap.LayoutOrder=D.order(cap.Parent);return cap
+end
+function D.badge(parent,id,labelText,value)
+    local root=frame(parent,'Badge_'..id,44)
+    local cap=text(root,labelText,12,theme.text);cap.Size=UDim2.new(0.55,0,1,0)
+    local pill=text(root,value,10,theme.muted);pill.Position=UDim2.fromScale(0.55,0);pill.Size=UDim2.new(0.45,0,1,0);pill.TextXAlignment=Enum.TextXAlignment.Right
+    D.widgets[id]=pill;return pill
+end
+function D.rowList(parent,id,limit,emptyLabel)
+    local root=frame(parent,'List_'..id,42)
+    local list={root=root,pool={},limit=limit or 6}
+    list.empty=text(root,emptyLabel or 'Aucun élément',12,theme.muted);list.empty.Size=UDim2.new(1,0,0,42)
+    for i=1,list.limit do
+        local row=make('TextButton',{Name='ListRow',Text='',AutoButtonColor=false,BackgroundColor3=theme.control,BorderSizePixel=0,Size=UDim2.new(1,0,0,44),Position=UDim2.fromOffset(0,(i-1)*50),Visible=false},root);corner(row,7)
+        local dot=line(row,12,18,6,6,theme.accent);D.bind(dot,'BackgroundColor3')
+        local title=text(row,'',12,theme.text);title.Position=UDim2.fromOffset(28,4);title.Size=UDim2.new(0.7,-28,0,22)
+        local sub=text(row,'',9,theme.muted);sub.Position=UDim2.fromOffset(28,25);sub.Size=UDim2.new(0.75,-28,0,14)
+        local badge=text(row,'',10,theme.muted);badge.Position=UDim2.fromScale(0.7,0);badge.Size=UDim2.new(0.3,-12,1,0);badge.TextXAlignment=Enum.TextXAlignment.Right
+        list.pool[i]={root=row,title=title,sub=sub,badge=badge}
+        connect(row.Activated,function() if list.onSelect and list.rows and list.rows[i] then list.onSelect(list.rows[i]) end end)
+    end
+    function list:set(rows)
+        self.rows=rows
+        local n=math.min(#rows,self.limit);self.empty.Visible=n==0
+        for i,entry in ipairs(self.pool) do
+            entry.root.Visible=i<=n
+            if rows[i] then entry.title.Text=tostring(rows[i].title or '');entry.sub.Text=tostring(rows[i].sub or '');entry.badge.Text=tostring(rows[i].badge or '') end
+        end
+        self.root.Size=UDim2.new(1,0,0,n==0 and 42 or n*50-6)
+    end
+    D.lists[id]=list;return list
+end
+function D.chart(parent,id,labelText)
+    local root=frame(parent,'Chart_'..id,108)
+    local cap=text(root,labelText,11,theme.muted);cap.Size=UDim2.new(0.7,0,0,22)
+    local value=text(root,'—',12,theme.text);value.Position=UDim2.fromScale(0.7,0);value.Size=UDim2.new(0.3,0,0,22);value.TextXAlignment=Enum.TextXAlignment.Right
+    local plot=make('Frame',{BackgroundTransparency=1,Position=UDim2.fromOffset(0,30),Size=UDim2.new(1,0,0,64)},root)
+    local chart={values={},bars={},label=value}
+    for i=1,30 do
+        local bar=make('Frame',{Name='Sample'..i,BackgroundColor3=theme.accent,BorderSizePixel=0,AnchorPoint=Vector2.new(0,1),
+            Position=UDim2.new((i-1)/30,1,1,0),Size=UDim2.new(1/30,-3,0,0)},plot);corner(bar,2);D.bind(bar,'BackgroundColor3');chart.bars[i]=bar
+    end
+    D.charts[id]=chart
+end
+function D.recordMetrics(fps,ping)
+    D.lastFPS=fps;D.lastPing=ping
+    for id,chart in pairs(D.charts) do
+        local value=id=='fps' and fps or (isNum(ping) and ping*1000 or nil)
+        chart.values[#chart.values+1]=isNum(value) and value or false
+        while #chart.values>30 do table.remove(chart.values,1) end
+        local maximum=1;for _,n in ipairs(chart.values) do if isNum(n) then maximum=math.max(maximum,n) end end
+        chart.label.Text=isNum(value) and string.format('%.0f%s',value,id=='fps' and ' FPS' or ' ms') or 'N/D'
+        for i,bar in ipairs(chart.bars) do local n=chart.values[i];bar.Size=UDim2.new(1/30,-3,isNum(n) and n/maximum or 0,0) end
+    end
+end
+-- Capture souris/tactile unique ; aucun enregistrement de reglages pendant un glisser.
+D.pointer=nil
+local function startPointer(input,move,finish,cancel)
+    if input.UserInputType~=Enum.UserInputType.MouseButton1 and input.UserInputType~=Enum.UserInputType.Touch then return end
+    if D.pointer and D.pointer.cancel then D.pointer.cancel() end
+    D.pointer={input=input,move=move,finish=finish,cancel=cancel};move(input.Position)
+end
+function D.cancelPointer()
+    local p=D.pointer;D.pointer=nil;if p and p.cancel then p.cancel() end
+end
+connect(UIS.InputChanged,function(input)
+    local p=D.pointer;if not p then return end
+    if p.input.UserInputType==Enum.UserInputType.Touch and input~=p.input then return end
+    if p.input.UserInputType~=Enum.UserInputType.Touch and input.UserInputType~=Enum.UserInputType.MouseMovement then return end
+    p.move(input.Position)
+end)
+connect(UIS.InputEnded,function(input)
+    local p=D.pointer
+    if p and (input==p.input or (p.input.UserInputType==Enum.UserInputType.MouseButton1 and input.UserInputType==Enum.UserInputType.MouseButton1)) then
+        D.pointer=nil;if p.finish then p.finish() end
+    end
+end)
+connect(UIS.WindowFocusReleased,D.cancelPointer)
+local function fraction(control,point)
+    local size,pos=control.AbsoluteSize,control.AbsolutePosition
+    if not size or not pos or size.X<=0 or size.Y<=0 then return nil end
+    return clamp((point.X-pos.X)/size.X,0,1),clamp((point.Y-pos.Y)/size.Y,0,1)
+end
+function D.colorPicker(parent,onPreview,onCommit)
+    local root=frame(parent,'ColorPicker',230)
+    local p={root=root,h=0,s=0,v=1,hex=ui.accent};D.picker=p
+    local base=make('Frame',{Name='SVPlane',BackgroundColor3=color(255,0,0),BorderSizePixel=0,Size=UDim2.new(1,-34,0,160),ClipsDescendants=true},root);corner(base,8)
+    local white=make('Frame',{BackgroundColor3=color(255,255,255),BorderSizePixel=0,Size=UDim2.fromScale(1,1)},base)
+    make('UIGradient',{Transparency=NumberSequence.new({NumberSequenceKeypoint.new(0,0),NumberSequenceKeypoint.new(1,1)})},white)
+    local black=make('Frame',{BackgroundColor3=color(0,0,0),BorderSizePixel=0,Size=UDim2.fromScale(1,1)},base)
+    make('UIGradient',{Rotation=90,Transparency=NumberSequence.new({NumberSequenceKeypoint.new(0,1),NumberSequenceKeypoint.new(1,0)})},black)
+    local hit=make('TextButton',{Name='SVInput',Text='',AutoButtonColor=false,BackgroundTransparency=1,Size=UDim2.fromScale(1,1),ZIndex=4},base)
+    local marker=make('Frame',{Name='ColorCursor',BackgroundTransparency=1,BorderSizePixel=0,Size=UDim2.fromOffset(12,12),AnchorPoint=Vector2.new(0.5,0.5),ZIndex=5},base);corner(marker,6);stroke(marker,color(255,255,255))
+    local hue=make('TextButton',{Name='HueInput',Text='',AutoButtonColor=false,BackgroundColor3=color(255,255,255),BorderSizePixel=0,
+        Position=UDim2.new(1,-22,0,0),Size=UDim2.fromOffset(22,160)},root);corner(hue,6)
+    local points={};for i=0,6 do points[#points+1]=ColorSequenceKeypoint.new(i/6,hexColor(Hub.hsvToHex(i/6,1,1))) end
+    make('UIGradient',{Rotation=90,Color=ColorSequence.new(points)},hue)
+    local hueCursor=make('Frame',{Name='HueCursor',Size=UDim2.new(1,6,0,5),Position=UDim2.fromOffset(-3,0),BackgroundColor3=color(255,255,255),BorderSizePixel=0},hue);corner(hueCursor,2)
+    local swatch=make('Frame',{Name='ColorPreview',BackgroundColor3=theme.accent,BorderSizePixel=0,Position=UDim2.fromOffset(0,176),Size=UDim2.fromOffset(40,36)},root);corner(swatch,8)
+    local hexLabel=text(root,'#'..ui.accent,16,theme.text);hexLabel.Position=UDim2.fromOffset(54,175);hexLabel.Size=UDim2.new(1,-54,0,24)
+    local help=text(root,'Aperçu · appliquer pour sauvegarder',9,theme.muted);help.Position=UDim2.fromOffset(54,200);help.Size=UDim2.new(1,-54,0,18)
+    function p.paint(preview)
+        p.hex=Hub.hsvToHex(p.h,p.s,p.v);base.BackgroundColor3=hexColor(Hub.hsvToHex(p.h,1,1));swatch.BackgroundColor3=hexColor(p.hex)
+        hexLabel.Text='#'..p.hex;marker.Position=UDim2.fromScale(p.s,1-p.v);hueCursor.Position=UDim2.new(0,-3,p.h,-2)
+        if preview then
+            D.fastPreview=true;local ok,err=pcall(onPreview,p.hex);D.fastPreview=false
+            if not ok then error(err) end
+        end
+    end
+    function p.sync(hex)
+        local h,s,v=Hub.hexToHSV(hex);if not h then return false end
+        p.h,p.s,p.v=h,s,v;p.paint(false);return true
+    end
+    function p.cancel() p.sync(ui.accent);onPreview(ui.accent) end
+    function p.commit() ui.accent=p.hex;onCommit(p.hex) end
+    function p.layout() end
+    local function svStart(input)
+        startPointer(input,function(point) local x,y=fraction(hit,point);if x then p.s=x;p.v=1-y;p.paint(true) end end,nil,p.cancel)
+    end
+    connect(hit.InputBegan,svStart);connect(marker.InputBegan,svStart)
+    local function hueStart(input)
+        startPointer(input,function(point) local _,y=fraction(hue,point);if y then p.h=math.min(y,0.999999);p.paint(true) end end,nil,p.cancel)
+    end
+    connect(hue.InputBegan,hueStart);connect(hueCursor.InputBegan,hueStart)
+    p.sv=hit;p.hue=hue;p.sync(ui.accent);return p
+end
+function D.slider(parent,name,labelText,lo,hi,initial,onCommit)
+    local root=frame(parent,name,62)
+    local cap=text(root,labelText,12,theme.text);cap.Size=UDim2.new(0.7,0,0,22)
+    local val=text(root,string.format('%.0f %%',initial*100),11,theme.muted);val.Position=UDim2.fromScale(0.7,0);val.Size=UDim2.new(0.3,0,0,22);val.TextXAlignment=Enum.TextXAlignment.Right
+    local hit=make('TextButton',{Name='SliderInput',Text='',AutoButtonColor=false,BackgroundTransparency=1,Position=UDim2.fromOffset(0,28),Size=UDim2.new(1,0,0,30)},root)
+    local track=make('Frame',{BackgroundColor3=color(40,42,52),BorderSizePixel=0,Position=UDim2.fromOffset(0,11),Size=UDim2.new(1,0,0,5)},hit);corner(track,3)
+    local fill=make('Frame',{BackgroundColor3=theme.accent,BorderSizePixel=0,Size=UDim2.fromScale((initial-lo)/(hi-lo),1)},track);corner(fill,3);D.bind(fill,'BackgroundColor3')
+    local knob=make('Frame',{BackgroundColor3=theme.text,BorderSizePixel=0,Size=UDim2.fromOffset(12,12),AnchorPoint=Vector2.new(0.5,0.5),Position=UDim2.fromScale((initial-lo)/(hi-lo),0.5)},track);corner(knob,6)
+    local slider={value=initial,root=root,input=hit}
+    function slider.sync(value) slider.value=value;val.Text=string.format('%.0f %%',value*100);fill.Size=UDim2.fromScale((value-lo)/(hi-lo),1);knob.Position=UDim2.fromScale((value-lo)/(hi-lo),0.5) end
+    local function start(input)
+        local before=slider.value
+        startPointer(input,function(point) local x=fraction(hit,point);if x then slider.sync(math.floor((lo+x*(hi-lo))*100+0.5)/100) end end,
+            function() onCommit(slider.value) end,function() slider.sync(before) end)
+    end
+    connect(hit.InputBegan,start);connect(knob.InputBegan,start)
+    return slider
+end
+function D.buildServer(serverPage,action)
+    local maxPlayers=Players.MaxPlayers
+    S.server=Hub.newServer(os.clock(),isNum(maxPlayers) and maxPlayers>0 and maxPlayers or nil)
+    local monitor=S.server
+    local function added(p,baseline)
+        if not S.running then return end
+        monitor:add(p.UserId,p.Name,p.DisplayName,os.clock(),baseline)
+    end
+    connect(Players.PlayerAdded,function(p) added(p,false) end)
+    connect(Players.PlayerRemoving,function(p) if S.running then monitor:remove(p.UserId,os.clock()) end end)
+    local ok,players=pcall(function() return Players:GetPlayers() end)
+    if ok then for _,p in ipairs(players) do added(p,true) end end
+    D.section(serverPage,'Serveur en direct')
+    D.metricsGrid(serverPage,{{id='serverPlayers',label='JOUEURS PRÉSENTS'},{id='serverCapacity',label='CAPACITÉ'},{id='serverJoined',label='ARRIVÉES OBSERVÉES'},{id='serverLeft',label='DÉPARTS OBSERVÉS'}})
+    D.gauge(serverPage,'serverOccupancy','Remplissage du serveur')
+    D.badge(serverPage,'serverRegion','Localisation','Non fournie')
+    D.caption(serverPage,'Roblox ne communique pas la région physique au client.')
+    D.detail(serverPage,'serverPing','Ping vers le serveur','N/D')
+    D.detail(serverPage,'serverJob','Identifiant',type(game.JobId)=='string' and game.JobId~='' and game.JobId or 'N/D')
+    action(serverPage,'Copier l’identifiant du serveur',function()
+        if type(setclipboard)=='function' and type(game.JobId)=='string' and game.JobId~='' then
+            local copied=pcall(setclipboard,game.JobId);S.toast(copied and 'Identifiant copié' or 'Copie impossible','info')
+        else S.toast('Presse-papiers ou identifiant indisponible','warn') end
+    end)
+    D.section(serverPage,'Joueurs présents')
+    D.rowList(serverPage,'serverRoster',8,'Aucun joueur observé')
+    D.rosterPage=1
+    local controls=frame(serverPage,'RosterPagination',34)
+    local prev=make('TextButton',{Name='RosterPrevious',Text='‹',TextColor3=theme.text,TextSize=18,Font=Enum.Font.Gotham,
+        BackgroundColor3=theme.control,BorderSizePixel=0,Size=UDim2.fromOffset(36,32)},controls);corner(prev,6)
+    local nextButton=make('TextButton',{Name='RosterNext',Text='›',TextColor3=theme.text,TextSize=18,Font=Enum.Font.Gotham,
+        BackgroundColor3=theme.control,BorderSizePixel=0,Position=UDim2.new(1,-36,0,0),Size=UDim2.fromOffset(36,32)},controls);corner(nextButton,6)
+    local pageNumber=text(controls,'1 / 1',11,theme.muted);pageNumber.Position=UDim2.fromOffset(44,0);pageNumber.Size=UDim2.new(1,-88,1,0);pageNumber.TextXAlignment=Enum.TextXAlignment.Center;D.widgets.rosterPage=pageNumber
+    connect(prev.Activated,function() D.rosterPage=math.max(1,D.rosterPage-1);D.refreshServer() end)
+    connect(nextButton.Activated,function() D.rosterPage=math.min(math.max(1,math.ceil(monitor.count/8)),D.rosterPage+1);D.refreshServer() end)
+    D.section(serverPage,'Dernières arrivées')
+    D.caption(serverPage,'Historique depuis l’ouverture du hub')
+    D.rowList(serverPage,'serverJoins',6,'Aucune arrivée depuis l’ouverture')
+    D.section(serverPage,'Derniers départs')
+    D.rowList(serverPage,'serverLeaves',6,'Aucun départ depuis l’ouverture')
+end
+function D.refreshServer()
+    local m=S.server;if not m then return end
+    D.value('serverPlayers',m.count);D.value('serverCapacity',m.maxPlayers or 'N/D');D.value('serverJoined',m.joined);D.value('serverLeft',m.left)
+    D.setGauge('serverOccupancy',m.count..' / '..tostring(m.maxPlayers or '?'),m.maxPlayers and m.count/m.maxPlayers or 0)
+    D.value('serverPing',isNum(D.lastPing) and string.format('%.0f ms',D.lastPing*1000) or 'N/D')
+    local roster=m:roster();local pages=math.max(1,math.ceil(#roster/8));D.rosterPage=clamp(D.rosterPage or 1,1,pages)
+    local rows={}
+    for i=(D.rosterPage-1)*8+1,math.min(#roster,D.rosterPage*8) do
+        local p=roster[i];rows[#rows+1]={title=p.display,sub='@'..p.name,badge=p.id==player.UserId and 'VOUS' or 'PRÉSENT'}
+    end
+    D.lists.serverRoster:set(rows);D.value('rosterPage',D.rosterPage..' / '..pages)
+    for kind,key in pairs({join='serverJoins',leave='serverLeaves'}) do
+        rows={}
+        for _,e in ipairs(m:recent(kind,6)) do rows[#rows+1]={title=e.player.display,sub='@'..e.player.name,badge=string.format('%.0f s',math.max(0,os.clock()-e.at))} end
+        D.lists[key]:set(rows)
+    end
+end
+function D.refreshVisuals()
+    local h,m=S.hub,S.hub.money
+    local snap=h:snapshot(os.clock());local rate=snap.hourly and string.format('%.0f $/h',snap.hourly) or 'N/D'
+    D.value('cash',shortMoney(m.cash));D.value('earned',shortMoney(m.earned));D.value('deposited',shortMoney(m.deposited));D.value('hourly',rate)
+    D.value('sales',m.sales);D.value('deposits',m.deposits);D.value('baitUsed',m.baitUsed);D.value('baitAdded',m.baitAdded)
+    D.value('casts',S.castAttempts);D.value('clicks',S.clicks);D.value('activity',D.stateText(S.state,''));D.value('carName',S.car and S.car.name or 'Aucun véhicule')
+    D.value('activeSpot',h.activeSpot or 'Aucun spot');D.value('spotsCount',countKeys(h.library.spots));D.value('routesCount',countKeys(h.library.routes));D.value('recordedPoints',#S.recordBuffer)
+    D.value('farmPlanted',h.farm.planted);D.value('farmHarvested',h.farm.harvested);D.value('farmCycles',h.farm.cycles);D.value('farmStatus',h.farm.available and 'Adaptateur chargé' or 'Indisponible')
+    D.value('errorsCount',#h.errors);D.value('session',string.format('%02d:%02d',math.floor(snap.elapsed/60),math.floor(snap.elapsed%60)))
+    D.setGauge('inventory',S.inventoryText,(S.fishCount or 0)/S.inventoryLimit)
+    local driveRatio=S.driver and S.driver.total and (S.driver.s or 0)/S.driver.total or 0
+    D.setGauge('drive',string.format('%.0f %%',driveRatio*100),driveRatio)
+    local seat=currentSeat and currentSeat() -- fourni par la portee du script, lecture seulement
+    D.value('vehicleSpeed',seat and string.format('%.0f studs/s',seat.AssemblyLinearVelocity.Magnitude) or '—')
+    local function libraryList(key,source)
+        local rows={};for name,value in pairs(source) do rows[#rows+1]={title=name,sub=key=='spots' and 'Spot enregistré' or 'Trajet enregistré',badge=key=='spots' and (h.activeSpot==name and 'ACTIF' or '') or (#value..' pts')} end
+        table.sort(rows,function(a,b) return a.title<b.title end);if D.lists[key] then D.lists[key]:set(rows) end
+    end
+    libraryList('spots',h.library.spots);libraryList('routes',h.library.routes)
+    if D.lists.spotStats then
+        local rows={};for name,stat in pairs(h.spotStats) do rows[#rows+1]={title=name,sub=stat.texts..' textes · '..stat.rareSignals..' signaux rares',badge=stat.casts..' lancers'} end
+        table.sort(rows,function(a,b) return a.title<b.title end);D.lists.spotStats:set(rows)
+    end
+    if D.lists.errors then
+        local rows={};for i=#h.errors,math.max(1,#h.errors-5),-1 do local e=h.errors[i];rows[#rows+1]={title=e.stage,sub=e.message,badge='ERREUR'} end
+        D.lists.errors:set(rows)
+    end
+    for _,meta in pairs(D.pages) do
+        local vals
+        if meta.name=='Money' then vals={shortMoney(m.earned),shortMoney(m.cash),rate}
+        elseif meta.name=='Vehicle' then vals={S.car and S.car.name or '—',tostring(countKeys(h.library.routes)),tostring(#S.recordBuffer)}
+        elseif meta.name=='Server' then vals={S.server and tostring(S.server.count) or '—',S.server and tostring(S.server.maxPlayers or '?') or '—',isNum(D.lastPing) and string.format('%.0f ms',D.lastPing*1000) or 'N/D'}
+        elseif meta.name=='Farming' then vals={tostring(h.farm.planted),tostring(h.farm.harvested),tostring(h.farm.cycles)}
+        elseif meta.name=='Settings' then vals={'#'..ui.accent,string.format('%.0f %%',ui.scale*100),ui.animations and 'Activées' or 'Coupées'}
+        elseif meta.name=='Statistics' then vals={string.format('%02d:%02d',math.floor(snap.elapsed/60),math.floor(snap.elapsed%60)),tostring(S.castAttempts),tostring(#h.errors)}
+        else vals={S.inventoryText or '—',S.baitUnknown and '—' or 'x'..tostring(S.baitCount),tostring(S.castAttempts)} end
+        for i,v in ipairs(vals) do meta.tiles[i].Text=v end
+    end
+    D.refreshServer()
+end
+
+
 end
 
 
@@ -2243,7 +2601,7 @@ end
 -- ACCUEIL
 ---------------------------------------------------------------------------
 local home = page('Fishing')
-infoLabel = notice(home, '', 76)
+section(home,'Automatisation')
 toggle(home, function() return (S.fishingEnabled and '[ON]  ' or '[OFF] ') .. 'Peche automatique' end,
     function() S.fishingEnabled = not S.fishingEnabled end, 44)
 toggle(home, function() return (S.autoCycle and '[ON]  ' or '[OFF] ') .. 'Vente auto quand l\'inventaire est plein' end,
@@ -2256,11 +2614,12 @@ toggle(home, function() return 'Poisson rare : ' .. RARE_ACTIONS[ui.rareAction] 
     end, 44)
 toggle(home, function() return 'Vitesse voiture : ' .. S.speedPreset end,
     function() S.nextSpeedPreset(); ui.speedPreset = S.speedPreset; saveSettings() end, 44)
-local stopBtn = button(home, 'STOP  (tout annuler, F12)', function() S.cancel() end, 44)
-stopBtn.BackgroundColor3 = theme.danger
-stopBtn.TextXAlignment = Enum.TextXAlignment.Center
-section(home, 'JOURNAL')
+section(home,'Session de pêche')
+S.design.gauge(home,'inventory','Inventaire')
+S.design.metricsGrid(home,{{id='casts',label='LANCERS'},{id='clicks',label='CLICS MINI-JEU'}})
+S.design.detail(home,'activeSpot','Spot actif','Aucun spot')
 logLabel = notice(home, '', 128)
+logLabel.Visible = false
 logLabel.TextSize = 11; logLabel.Font = Enum.Font.Code
 
 ---------------------------------------------------------------------------
@@ -2271,7 +2630,7 @@ local function result(ok, message)
     logLine(text); if S.toast then S.toast(text, ok and 'ok' or 'warn') end
 end
 section(home, 'SPOTS DE PECHE')
-notice(home, 'Enregistre la position et l\'orientation du personnage, avec la visee ecran si definie. Aucune position d\'hamecon deduite.', 64)
+S.design.caption(home,'Enregistre cet endroit avec sa visée, puis retrouve-le ici.')
 local spotName = textbox(home, 'Nom du spot')
 grid(home, {
     { 'Enregistrer ce spot', function() result(S.saveSpot(spotName.Text)) end },
@@ -2291,12 +2650,14 @@ end)
 button(home, 'Reprendre la peche apres STOP', function()
     result(S.resume(), S.inventoryFull and 'Inventaire plein : liberer avant de reprendre' or 'Reprise demandee')
 end)
-S.views.spots = notice(home, '', 80)
+S.design.rowList(home,'spots',5,'Aucun spot enregistré').onSelect=function(row) spotName.Text=row.title end
+S.design.detail(home,'spotsCount','Spots enregistrés','0')
 
 local vehicle = page('Vehicle')
 section(vehicle, 'AUTO DRIVE V2')
-notice(vehicle, 'Conduite native W/A/S/D. Vitesse cible en studs/s, non calibree. Stationnement = freinage au dernier point ; orientation finale non geree.', 70)
-S.views.routes = notice(vehicle, '', 70)
+S.design.detail(vehicle,'carName','Véhicule','Aucun véhicule')
+S.design.metricsGrid(vehicle,{{id='vehicleSpeed',label='VITESSE MESURÉE'},{id='recordedPoints',label='POINTS ENREGISTRÉS'}})
+S.design.gauge(vehicle,'drive','Progression du trajet')
 grid(vehicle, {
     { 'Memoriser voiture actuelle', function() result(rememberCar()) end },
     { 'Tester ALLER', function() result(testDrive('aller')) end },
@@ -2311,7 +2672,10 @@ toggle(vehicle, function() return S.recording and ('Enregistrement : ' .. #S.rec
         S.recording = not S.recording
         if S.recording then S.recordBuffer = {} end
     end)
+section(vehicle,'Destinations')
+S.design.rowList(vehicle,'routes',6,'Aucune destination enregistrée')
 local routeName = textbox(vehicle, 'Nom de destination')
+S.design.lists.routes.onSelect=function(row) routeName.Text=row.title end
 grid(vehicle, {
     { 'Conserver le trajet nomme', function() result(S.saveNamedRoute(routeName.Text)) end },
     { 'Conduire vers destination', function() result(S.driveNamedRoute(routeName.Text)) end },
@@ -2321,8 +2685,11 @@ grid(vehicle, {
 
 local money = page('Money')
 section(money, 'MONEY MANAGER / SESSION')
-S.views.money = notice(money, '', 144)
-notice(money, 'Gains = hausse du solde observee pendant une vente avec baisse d\'inventaire. Depot = baisse du solde apres confirmation ATM (heuristique). Montants inconnus exclus. Taux horaire apres 60 s.', 100)
+S.design.metricsGrid(money,{{id='cash',label='PORTEFEUILLE OBSERVÉ'},{id='earned',label='GAINS DE VENTES'},{id='deposited',label='TOTAL DÉPOSÉ'},{id='hourly',label='ESTIMATION / HEURE'}})
+S.views.money = S.design.widgets.cash
+S.design.caption(money,'Montants observés · estimation après 60 secondes')
+section(money,'Ventes & dépôts')
+S.design.metricsGrid(money,{{id='sales',label='VENTES MESURÉES'},{id='deposits',label='DÉPÔTS OBSERVÉS'},{id='baitUsed',label='APPÂTS EN MOINS'},{id='baitAdded',label='APPÂTS AJOUTÉS'}})
 button(money, 'Actualiser le solde observe', function() result(S.refreshMoney()) end)
 button(money, 'Lancer le cycle vente / ATM / retour', function() result(S.runCycle()) end)
 toggle(money, function() return 'Depot ATM : ' .. (S.autoBank and 'actif' or 'inactif') end,
@@ -2332,8 +2699,9 @@ toggle(money, function() return 'Exiger une preuve de depot : ' .. (S.depositReq
 
 local farming = page('Farming')
 section(farming, 'AUTO FARM / ADAPTATEUR REQUIS')
-notice(farming, 'Integration BlockSpin indisponible : plantation et recolte reelles non observees. Le moteur peut etre teste avec un adaptateur local. Diagnostic requis avant une integration au jeu.', 90)
-S.views.farm = notice(farming, '', 70)
+S.design.badge(farming,'farmStatus','Culture automatique','Indisponible')
+S.design.caption(farming,'Interactions de plantation et récolte à identifier dans le jeu.')
+S.design.metricsGrid(farming,{{id='farmPlanted',label='PLANTATIONS'},{id='farmHarvested',label='RÉCOLTES'}})
 local planBox = textbox(farming, 'Parcelles : A:Corn, B:Pumpkin')
 local replant = true
 toggle(farming, function() return 'Replantation : ' .. (replant and 'oui' or 'non') end, function() replant = not replant end)
@@ -2377,38 +2745,58 @@ local PLANTS_WEB = {
     { 'Citrouille (Pumpkin)', 'gains annonces par des joueurs, non verifies' },
 }
 local index = page('Statistics')
-section(index, 'AFK DASHBOARD / SESSION')
-S.views.dashboard = notice(index, '', 110)
+S.views.dashboard = section(index, 'Session')
+S.design.metricsGrid(index,{{id='session',label='DURÉE'},{id='errorsCount',label='ERREURS'}})
+S.design.detail(index,'activity','Activité','Prêt')
+section(index,'Performances')
+S.design.chart(index,'fps','Images par seconde')
+S.design.chart(index,'ping','Ping vers le serveur')
 section(index, 'STATISTIQUES PAR SPOT (SESSION)')
-S.views.spotStats = notice(index, '', 70)
+S.design.rowList(index,'spotStats',8,'Aucune mesure par spot')
 section(index, 'JOURNAL DES ERREURS (80 MAXIMUM)')
-S.views.errors = notice(index, '', 160)
+S.design.rowList(index,'errors',6,'Aucune erreur observée')
+S.views.errors = S.design.lists.errors.root
+section(index,'Diagnostic')
+button(index,'Afficher / masquer le journal technique',function() logLabel.Visible=not logLabel.Visible;S.design.layout() end)
 logLabel.Parent = S.design.parent(index)
-section(index, 'POISSONS (liste web, non verifiee en jeu)')
+logLabel.LayoutOrder = S.design.order(logLabel.Parent)
+section(index, 'Catalogue indicatif')
+S.design.caption(index,'Sources web · informations à confirmer en jeu')
 local lines = {}
 for _, f in ipairs(FISH_WEB) do lines[#lines + 1] = string.format('%s  |  %s  |  %s', f[1], f[2], f[3]) end
-notice(index, table.concat(lines, '\n'), #FISH_WEB * 16 + 14)
+do
+local rows={};for _,f in ipairs(FISH_WEB) do rows[#rows+1]={title=f[1],sub=f[2],badge=f[3]} end
+S.design.rowList(index,'catalogFish',8,'Aucun poisson référencé'):set(rows)
+end
 section(index, 'VUS PENDANT TES PECHES (textes apparus apres une prise)')
-local seenLabel = notice(index, '', 60)
+local seenList = S.design.rowList(index,'seenFish',10,'Aucun texte de prise observé')
 refreshFishLog = function()
     local names = {}
     for k, v in pairs(S.fishLog) do names[#names + 1] = { k, v } end
     table.sort(names, function(a, b) return a[2] > b[2] end)
     local t = {}
     for i = 1, math.min(15, #names) do t[#t + 1] = names[i][1] .. '  x' .. names[i][2] end
-    seenLabel.Text = #t == 0 and 'Rien encore : la liste se remplit pendant que tu peches.' or table.concat(t, '\n')
-    seenLabel.Size = UDim2.new(1, 0, 0, math.max(40, #t * 16 + 14))
+    local rows={};for i=1,math.min(10,#names) do rows[#rows+1]={title=names[i][1],sub='Texte observé',badge='x'..names[i][2]} end
+    seenList:set(rows)
 end
 refreshFishLog()
-section(index, 'PLANTES (liste web, non verifiee ; culture auto non disponible)')
+section(index, 'Plantes référencées')
 lines = {}
 for _, p in ipairs(PLANTS_WEB) do lines[#lines + 1] = p[1] .. '  |  ' .. p[2] end
-notice(index, table.concat(lines, '\n'), #PLANTS_WEB * 16 + 14)
+do
+local rows={};for _,plant in ipairs(PLANTS_WEB) do rows[#rows+1]={title=plant[1],sub='Référence web non validée',badge='À VALIDER'} end
+S.design.rowList(index,'catalogPlants',3,'Aucune plante référencée'):set(rows)
+end
 end
 
 ---------------------------------------------------------------------------
 -- REGLAGES
 ---------------------------------------------------------------------------
+do
+local serverPage = page('Server')
+S.design.buildServer(serverPage,button)
+end
+
 local settingsPage = page('Settings')
 section(settingsPage, 'BLACK EDITION / COULEUR')
 local PALETTE = { 'FF475C', 'C5F277', '5EC8FF', 'B07CFF', 'FF6FA8', 'FF9F43', 'FFD84D', '4DE0A0', 'F1F4EF' }
@@ -2418,12 +2806,18 @@ local function applyAccent(hex)
     S.design.applyAccent()
     updateTabs()
 end
+S.applyAccent = function(hex)
+    if type(hex)~='string' or not hex:match('^%x%x%x%x%x%x$') then return false end
+    applyAccent(hex);return true
+end
 do
+local picker = S.design.colorPicker(settingsPage,applyAccent,function(hex) ui.accent=hex;applyAccent(hex);saveSettings() end)
+grid(settingsPage,{{'Appliquer la couleur',picker.commit},{'Annuler la couleur',picker.cancel}})
 local customAccent = textbox(settingsPage, 'Accent #RRGGBB')
 button(settingsPage, 'Appliquer mon accent', function()
     local h = customAccent.Text:gsub('^#', ''):upper()
     if not h:match('^%x%x%x%x%x%x$') then logLine('Accent invalide : #RRGGBB requis'); return end
-    ui.accent = h; applyAccent(h); saveSettings()
+    ui.accent = h; applyAccent(h); if S.design.picker then S.design.picker.sync(h) end; saveSettings()
 end)
 toggle(settingsPage, function() return 'Animations : ' .. (ui.animations and 'oui' or 'non') end,
     function() ui.animations = not ui.animations; if not ui.animations then S.design.finishAnimations() end; saveSettings() end)
@@ -2434,14 +2828,21 @@ for i, hex in ipairs(PALETTE) do
     local sw = make('TextButton', { Name = 'Couleur' .. h, Text = '', BackgroundColor3 = hexColor(h), BorderSizePixel = 0,
         Size = UDim2.new(1 / #PALETTE, -6, 1, 0), Position = UDim2.new((i - 1) / #PALETTE, 3, 0, 0) }, swatches)
     round(sw, 8)
-    connect(sw.Activated, function() ui.accent = h; applyAccent(h); saveSettings() end)
+    connect(sw.Activated, function() ui.accent = h; applyAccent(h); if S.design.picker then S.design.picker.sync(h) end; saveSettings() end)
 end
-toggle(settingsPage, function() return 'Taille du menu : ' .. math.floor(ui.scale * 100 + 0.5) .. ' %' end,
-    function()
-        local nextScale = { [75] = 1, [100] = 1.25, [125] = 1.5, [150] = 0.75 }
-        ui.scale = nextScale[math.floor(ui.scale * 100 + 0.5)] or 1
-        menuScale.Scale = ui.scale; fitWindow(); saveSettings()
-    end)
+section(settingsPage,'Affichage & confort')
+S.design.scaleSlider=S.design.slider(settingsPage,'MenuScaleSlider','Échelle du menu',0.75,1.5,ui.scale,function(value)
+    ui.scale=value;menuScale.Scale=value;fitWindow();saveSettings()
+end)
+toggle(settingsPage,function() return 'Densité : '..ui.density end,function()
+    ui.density=ui.density=='normal' and 'compact' or 'normal';S.design.layout();saveSettings()
+end)
+toggle(settingsPage,function() return 'Mesures dans l’en-tête : '..(ui.metrics and 'oui' or 'non') end,function()
+    ui.metrics=not ui.metrics;metrics.Visible=ui.metrics;S.design.layout();saveSettings()
+end)
+toggle(settingsPage,function() return 'Masquer pendant la pêche : '..(ui.hideInMinigame and 'oui' or 'non') end,function()
+    ui.hideInMinigame=not ui.hideInMinigame;saveSettings()
+end)
 local overlay = label(gui, 'FPS --', 26)
 overlay.Name = 'PerformanceOverlay'
 overlay.Size = UDim2.fromOffset(200, 26)
@@ -2465,12 +2866,14 @@ local hotkeyButton = button(settingsPage, keyText(), function(b) capturing = tru
 
 section(settingsPage, 'PROFILS (tes reglages enregistres)')
 local profileBox = textbox(settingsPage, 'Nom du profil')
-local profileList = label(settingsPage, '', 22)
+local profileList = S.design.rowList(settingsPage,'profiles',10,'Aucun profil enregistré')
+profileList.onSelect=function(row) profileBox.Text=row.title end
 local function refreshProfiles()
     local names = {}
     for n in pairs(profiles) do names[#names + 1] = n end
     table.sort(names)
-    profileList.Text = #names == 0 and 'Aucun profil.' or ('Profils : ' .. table.concat(names, ', '))
+    local rows={};for _,name in ipairs(names) do rows[#rows+1]={title=name,sub='Profil enregistré',badge='CHOISIR'} end
+    profileList:set(rows)
 end
 local function profileName()
     local n = profileBox.Text:match('^%s*(.-)%s*$')
@@ -2483,6 +2886,8 @@ local function applyPrefs()
     overlay.Visible = ui.overlay
     metrics.Visible = ui.metrics
     S.setSpeedPreset(ui.speedPreset)
+    if S.design.picker then S.design.picker.sync(ui.accent) end
+    if S.design.scaleSlider then S.design.scaleSlider.sync(ui.scale) end
     if ui.size then window.Size = UDim2.fromOffset(ui.size.x, ui.size.y) end
     if ui.position then window.Position = UDim2.fromOffset(ui.position.x, ui.position.y) end
     if ui.overlayPosition then overlay.Position = UDim2.fromOffset(ui.overlayPosition.x, ui.overlayPosition.y) end
@@ -2587,33 +2992,6 @@ local function names(list)
     return #out == 0 and 'aucun' or table.concat(out, ', ')
 end
 function S.refreshDashboard()
-    local h, m = S.hub, S.hub.money
-    local snap = h:snapshot(os.clock())
-    local rate = snap.hourly and string.format('%.0f / h', snap.hourly) or 'N/D (< 60 s)'
-    local text = string.format('Activite : %s | Etat : %s\nSession : %.0f s | Gains observes en ventes : %.0f | Estimation : %s\nLancers : %d | Mini-jeu : %d clics | Erreurs : %d',
-        snap.activity, S.state, snap.elapsed, snap.earned, rate, S.castAttempts, S.clicks, #h.errors)
-    if S.views.dashboard then S.views.dashboard.Text = text end
-    if S.views.money then S.views.money.Text = string.format('Solde observe : %s\nVentes avec montant : %d | Gains : %.0f\nDepots observes : %d | Total depose : %.0f\nAppats lus : %s | Baisses : %d | Ajouts : %d\nTaux horaire : %s',
-        m.cash == nil and 'N/D' or tostring(m.cash), m.sales, m.earned, m.deposits, m.deposited,
-        m.bait == nil and 'N/D' or tostring(m.bait), m.baitUsed, m.baitAdded, rate) end
-    if S.views.spots then S.views.spots.Text = 'Spots : ' .. names(h.library.spots) .. '\nActif : ' .. tostring(h.activeSpot or 'aucun') end
-    if S.views.routes then S.views.routes.Text = 'Destinations : ' .. names(h.library.routes) .. '\nTrajet tampon : ' .. #S.recordBuffer .. ' points\n' .. tostring(S.driveStatus) end
-    if S.views.farm then S.views.farm.Text = (h.farm.available and 'Adaptateur local charge (validation jeu requise)' or 'Adaptateur BlockSpin absent')
-        .. string.format('\nPlantations confirmees : %d | Recoltes confirmees : %d\nPassages : %d', h.farm.planted, h.farm.harvested, h.farm.cycles) end
-    local lines = {}
-    for n, stat in pairs(h.spotStats) do
-        lines[#lines + 1] = string.format('%s : %d lancers, %d textes, %d signaux rares, %.0f s', n, stat.casts, stat.texts, stat.rareSignals, stat.seconds)
-    end
-    table.sort(lines)
-    if S.views.spotStats then
-        S.views.spotStats.Text = #lines > 0 and table.concat(lines, '\n') or 'Aucun spot actif mesure. Les textes et signaux rares sont heuristiques, pas des captures confirmees.'
-        S.views.spotStats.Size = UDim2.new(1, 0, 0, math.max(64, #lines * 32))
-    end
-    lines = {}
-    for i = math.max(1, #h.errors - 7), #h.errors do
-        local e = h.errors[i]; lines[#lines + 1] = e.stage .. ' : ' .. e.message
-    end
-    if S.views.errors then S.views.errors.Text = #lines > 0 and table.concat(lines, '\n') or 'Aucune erreur enregistree cette session' end
     S.design.refresh()
 end
 local emergency = button(gui, 'STOP / F12', S.cancel, 38)
@@ -2759,11 +3137,12 @@ local frames, elapsed = 0, 0
 connect(RunService.RenderStepped, function(dt)
     frames = frames + 1; elapsed = elapsed + dt
     if elapsed < 1 then return end
-    if ui.metrics or ui.overlay then
+    do
         local ok, ping = pcall(function() return player:GetNetworkPing() end)
         local pingText = (ok and isNum(ping) and ping >= 0) and string.format('%.0f ms', ping * 1000) or 'N/D'
         local txt = string.format('FPS %.0f | Ping %s', frames / elapsed, pingText)
         metrics.Text = txt; overlay.Text = txt
+        S.design.recordMetrics(frames / elapsed,ok and isNum(ping) and ping>=0 and ping or nil)
     end
     if carInfo.Parent then
         local seat = currentSeat()
@@ -2848,14 +3227,7 @@ local function resetPanel(panel)
 end
 
 local nextCheck, fullSince = 0, nil
-local function refreshInfo()
-    if not (infoLabel and infoLabel.Parent) then return end
-    local txt = string.format('Inventaire : %s      Appats : %s\nVoiture : %s\nLancers : %d      Clics mini-jeu : %d%s',
-        S.inventoryText, S.baitUnknown and '?' or ('x' .. tostring(S.baitCount)),
-        S.car and S.car.name or 'monte au volant une fois pour la memoriser',
-        S.castAttempts, S.clicks, S.keyErrors > 0 and ('      Erreurs touches : ' .. S.keyErrors) or '')
-    if infoLabel.Text ~= txt then infoLabel.Text = txt end
-end
+local function refreshInfo() end -- donnees presentes dans les widgets de presentation
 
 table.insert(conns, RunService.Heartbeat:Connect(function()
     if not S.running then return end

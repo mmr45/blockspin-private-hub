@@ -1,5 +1,16 @@
 # Historique
 
+## 1.1.0 — 2026-11-06 (validation Roblox requise)
+
+- Palette HSV choisie à la souris ou au tactile, aperçu, application/annulation et conservation de l’hex/palette/profils.
+- Photo et identité Roblox en haut à la place du monogramme B.
+- Pavés de diagnostic remplacés dans les vues principales par compteurs, jauges, badges et listes. Journal technique accessible mais replié.
+- Graphiques FPS/ping basés sur les 30 dernières mesures, échelle au glisser et densité compacte.
+- Nouvelle catégorie Server : population, capacité, ping, identifiant, joueurs présents paginés et dernières arrivées/départs depuis l’ouverture du hub. Région physique marquée « Non fournie ».
+- Sauvegarde des couleurs seulement sur action explicite, capture de pointeur annulée sur perte de focus, changement de catégorie, réduction, STOP et fermeture.
+- 310 vérifications réussies. Nouveaux widgets dans `src/visuals.lua`, toujours injectés dans l’unique script généré.
+
+
 ## Refonte UI 1.0.0 — 2026-11-06 (même PR)
 
 - Direction visuelle inspirée des références utilisateur : barre latérale à icônes locales, fond noir, accent rouge par défaut, cartes en colonnes, typographie et espaces revus.
