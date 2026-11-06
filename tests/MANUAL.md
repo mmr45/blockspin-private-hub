@@ -64,3 +64,12 @@ Aucun cas de cette version n'a été exécuté en jeu. Consigner chaque résulta
 31. Ouvrir Server : comparer population/capacité à Roblox. Faire rejoindre/quitter un compte de test : dernière arrivée/départ visible, aucune fausse arrivée pour les joueurs déjà présents au lancement.
 32. Tester pagination avec plus de huit joueurs, départ d’un joueur affiché sur la dernière page, fermeture/relance : pas d’observateur dupliqué. La région doit rester « Non fournie », et l’historique commencer à l’ouverture.
 33. Regarder les graphiques FPS/ping avec mesures manquantes : N/D, aucune mesure inventée. Tester 480 px de largeur et les transitions rapides pendant la palette.
+
+## V1.1.1 : régressions utilisateur (à exécuter)
+
+34. Money : relever la vraie source. Le montant change sans bouton ; si absent, N/D et état explicite. Ouvrir l’inventaire puis rechercher/choisir le portefeuille. Ne pas choisir un prix de boutique ou un solde bancaire à sa place.
+35. Faire une vente manuelle : hausse du compteur observée ; une vente/depot du cycle reste séparé. Changer de source ne doit pas produire un faux gain.
+36. Créer un spot sans nom puis capturer la visée sur l’eau après sa création. Sauvegarder la bibliothèque et relancer ; conserver point monde et position du personnage sans déplacement direct.
+37. Éloigner le curseur puis lancer, changer légèrement la caméra, mettre la cible hors champ : lancer correctement visé ou suspension explicite, jamais succès supposé.
+38. Mini-jeu : curseur ailleurs mais Roblox actif, clic sur la barre détectée. Autre application au premier plan : pause sans clic OS parasite. Retour dans Roblox : reprise. Répéter en fenêtre et plein écran pour vérifier l’inset.
+39. Saisir un nom de spot, glisser un réglage, presser F12 pendant l’attente de visée : aucun lancer/clic retardé après annulation.

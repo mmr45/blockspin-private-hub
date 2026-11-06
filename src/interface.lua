@@ -250,7 +250,7 @@ function D.showMenu(visible,automatic)
     else
         D.animate(window,0.16,{GroupTransparency=1})
         D.animate(menuScale,0.18,{Scale=ui.scale*0.98})
-        if not ui.animations then window.Visible=false
+        if automatic or not ui.animations then window.Visible=false
         else task.delay(0.18,function()
             if S.running and token==D.visibilityToken and not D.menuVisible then window.Visible=false end
         end) end

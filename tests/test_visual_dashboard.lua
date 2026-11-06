@@ -14,9 +14,9 @@ check('profil : avatar place en haut a la place du logo', profile.Position.Y.Sca
 check('profil : aucun monogramme B dans la barre laterale', (function()
     for _,o in ipairs(S.design.sidebar:GetDescendants()) do if o:IsA('TextLabel') and o.Text=='B' then return false end end;return true
 end)())
-check('dashboard : vrais widgets numeriques', S.design.widgets.cash.Text=='N/D' and S.design.widgets.casts.Text=='0')
+check('dashboard : vrais widgets numeriques', S.design.widgets.cash.Text=='500 $' and S.design.widgets.casts.Text=='0')
 check('dashboard : jauge inventaire reliee au compteur', S.design.widgets.inventory.Text=='18/18' and S.design.widgets.inventoryFill.Size.X.Scale==1)
-check('dashboard : pas de resume technique en bloc', S.views.dashboard.Text=='Session' and S.views.money.Text=='N/D')
+check('dashboard : pas de resume technique en bloc', S.views.dashboard.Text=='Session' and S.views.money.Text=='500 $')
 M.click('Money')
 check('tuiles : contenu adapte a la categorie', S.design.pages[M.ourGui():FindFirstChild('Money',true)].tiles[1].Text=='0 $')
 M.click('Statistics');M.run(32)

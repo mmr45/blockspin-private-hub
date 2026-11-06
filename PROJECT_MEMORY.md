@@ -1,3 +1,15 @@
+# Correctif V1.1.1 — 2026-11-06
+
+- Base : main `109e18cfd2c968610b5c6ab01cc4c7a1671b8514`, PR #5 fusionnée. Branche `fix/v1.1.1-money-fishing-input`, livraison par PR sans fusion automatique.
+- Retour réel utilisateur (captures 1.1.0) : UI affichée, Money bloqué à N/D/0, noms de spots invalides/absents, appât dépendant du curseur et clics du mini-jeu perdus hors fenêtre. Ce retour ne valide pas la version corrigée.
+- Money : lecture automatique avec cache et signaux Text/Value/attributs publics existants, scans manquants bornés à 10 s. Sources explicites de portefeuille ; montants nus/ambigus seulement sur choix utilisateur. N/D avec état explicite si aucun compteur fiable. Aucune donnée privée ou remote deviné.
+- Hausses/baisse du compteur séparées des ventes et dépôts vérifiés du cycle. Changer de source ne crée pas de faux gain. Estimation horaire uniquement après 60 s d’observation d’un compteur.
+- Spots : nom vide devient « Spot 1 », noms nettoyés, capture rattachée au spot actif même après sauvegarde en mémoire, point monde/viewport optionnels conservés dans la bibliothèque v1. Point de retour du cycle mis à jour en mémoire, jamais de déplacement direct.
+- Entrées pêche : reprojection du point monde par Camera, mouvement de souris natif puis attente/contrôle, vérification de Mouse.Hit si disponible. Clic au centre de la cible GUI détectée, hit-test pour l’inset, masquage immédiat du menu automatique. Pas de clic OS à une position inconnue.
+- Perte de focus : pêche suspendue, reprise avec réinitialisation ; saisie/curseur de réglage suspend les entrées. **Aucune promesse de fonctionnement en arrière-plan, aucune prise de focus forcée ni contournement.**
+- 373 vérifications réussies en simulation, build et contrôles statiques réussis. Correctif à valider dans Roblox/Xeno ; voir `tests/VALIDATION_V111.md`.
+- Demande suivante utilisateur : idées Server et détection de plantation avec timers à distance. **Pas encore implémenté** : il faut observer les signaux de plantation/croissance et la source de durée réelle. Un timer estimé ne doit jamais être annoncé exact. Clarification reçue : ailleurs sur la map, le jeu montre un temps et un pourcentage. Prochaine étape : identifier leurs objets/signaux réels et l’identité de chaque plante ; ne pas annoncer ce tracker comme implémenté dans le correctif Money/pêche.
+
 # V1.1.0 — tableau visuel et serveur — 2026-11-06
 
 - Base : main `39feadb0a1fd722624b3ca11c8c21742eef35dad` (PR #4 fusionnée par l’utilisateur). Nouvelle branche `feat/v1.1-visual-dashboard`, nouvelle PR à relire sans fusion automatique.

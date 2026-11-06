@@ -68,9 +68,12 @@ function Core:snapshot(now)
         hourly = elapsed >= 60 and self.money.earned * 3600 / elapsed or nil,
         activity = self.current and self.current.name or 'repos' }
 end
-function Core:observeCash(n)
+function Core:observeCash(n,source,now)
     if not finite(n) or n < 0 then return false end
     local m = self.money
+    if source and m.cashSource and source~=m.cashSource then m.cash=nil end
+    if source then m.cashSource=source end
+    if finite(now) and m.observedStartedAt==nil then m.observedStartedAt=now end
     if m.cash ~= nil then
         m.observedIncreases = m.observedIncreases + math.max(0, n - m.cash)
         m.observedDecreases = m.observedDecreases + math.max(0, m.cash - n)
@@ -99,11 +102,46 @@ function Core:transaction(id, kind, before, after, proof)
     else m.deposited = m.deposited + amount; m.deposits = m.deposits + 1 end
     self:observeCash(after); return true
 end
+function Core.normalizeName(name)
+    if type(name)~='string' then return '' end
+    return (name:gsub('^%s+',''):gsub('%s+$',''))
+end
+function Core.validAim(aim)
+    if type(aim)~='table' or not finite(aim.x) or not finite(aim.y) then return false end
+    if aim.world~=nil then
+        if type(aim.world)~='table' or #aim.world~=3 then return false end
+        for _,n in ipairs(aim.world) do if not finite(n) then return false end end
+    end
+    if aim.viewport~=nil then
+        if type(aim.viewport)~='table' or not finite(aim.viewport.x) or not finite(aim.viewport.y) or aim.viewport.x<=0 or aim.viewport.y<=0 then return false end
+    end
+    return true
+end
+function Core:updateSpotAim(name,aim)
+    if not self.library.spots[name] then return false,'spot introuvable' end
+    if not Core.validAim(aim) then return false,'visee invalide' end
+    self.library.spots[name].aim=copy(aim);return true
+end
+function Core.cashText(raw,allowBare)
+    if type(raw)~='string' or #raw>512 then return nil end
+    raw=raw:gsub('<[^>]*>',''):gsub(' ',' '):gsub(' ',' '):gsub(' ',' ')
+    local normalized=fold(raw)
+    local labels={'equilibre des mains','argent en main','argent en poche','cash','wallet','portefeuille','solde en main','hand balance','cash in hand','money in hand'}
+    for _,label in ipairs(labels) do
+        local value=normalized:match('^%s*'..label..'%s*:%s*%$?%s*([%d, %.]+)%s*$')
+        if value then return Core.parseMoney(value),'label' end
+    end
+    if allowBare then
+        local value=raw:match('^%s*%$%s*([%d, %.]+)%s*$') or raw:match('^%s*([%d, %.]+)%s*%$%s*$')
+            or raw:match('^%s*€%s*([%d, %.]+)%s*$') or raw:match('^%s*([%d, %.]+)%s*€%s*$')
+        if value then return Core.parseMoney(value),'currency' end
+    end
+end
 function Core:addSpot(name, cf, aim)
     if not nameOK(name) then return false, 'nom du spot invalide' end
     if type(cf) ~= 'table' or #cf ~= 12 then return false, 'position de 12 nombres requise' end
     for _, n in ipairs(cf) do if not finite(n) then return false, 'position invalide' end end
-    if aim ~= nil and (type(aim) ~= 'table' or not finite(aim.x) or not finite(aim.y)) then return false, 'visee invalide' end
+    if aim ~= nil and not Core.validAim(aim) then return false, 'visee invalide' end
     if self.library.spots[name] then return false, 'spot existant : supprimer explicitement avant de remplacer' end
     local count = 0; for _ in pairs(self.library.spots) do count = count + 1 end
     if count >= 50 then return false, 'maximum 50 spots' end
